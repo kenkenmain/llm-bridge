@@ -513,7 +513,7 @@ func (b *Bridge) restartLLM(channelID string) string {
 	b.mu.Lock()
 	session, ok := b.repos[repoName]
 	if ok && session.llm != nil {
-		session.llm.Stop()
+		_ = session.llm.Stop()
 		if session.cancelCtx != nil {
 			session.cancelCtx()
 		}
