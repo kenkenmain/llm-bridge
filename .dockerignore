@@ -1,0 +1,27 @@
+# Build artifacts
+llm-bridge
+*.exe
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# Config (mounted at runtime)
+llm-bridge.yaml
+*.env
+
+# Docs
+docs/
+*.md
+!CLAUDE.md
+
+# Tests
+*_test.go
+
+# Local development
+.agents/

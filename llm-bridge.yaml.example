@@ -1,0 +1,28 @@
+# llm-bridge configuration
+# Copy to llm-bridge.yaml and customize
+
+repos:
+  notification-hooks:
+    provider: discord
+    channel_id: "123456789012345678"
+    llm: claude
+    working_dir: /home/user/projects/notification-hooks
+
+  my-project:
+    provider: telegram
+    channel_id: "-1001234567890"
+    llm: claude
+    working_dir: /home/user/projects/my-project
+
+defaults:
+  llm: claude
+  claude_path: claude  # or /usr/local/bin/claude for specific version
+  output_threshold: 1500
+  idle_timeout: 10m
+  resume_session: true
+
+providers:
+  discord:
+    bot_token: "${DISCORD_BOT_TOKEN}"
+  telegram:
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
