@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "stages": {
+    "plan": {
+      "planReview": {
+        "tool": "mcp__codex-high__codex",
+        "maxRetries": 3,
+        "blockOnSeverity": "LOW"
+      }
+    },
+    "implement": {
+      "implementReview": {
+        "tool": "mcp__codex__codex",
+        "maxRetries": 3,
+        "blockOnSeverity": "LOW"
+      }
+    },
+    "test": {
+      "enabled": true,
+      "instructions": "Create a PR to trigger GitHub CI. Steps: 1) Create feature branch if not already on one, 2) Commit changes, 3) Push and create PR: gh pr create --title 'feat: <description>' --body '...', 4) Add 'ci' label to trigger CI: gh pr edit --add-label ci, 5) Wait for CI: gh pr checks --watch, 6) If CI fails, fix issues, push, and wait again, 7) Only proceed when all PR checks are green.",
+      "commands": {
+        "lint": "echo 'Linting handled by GitHub CI'",
+        "test": "gh pr checks --json state -q '.[].state' | grep -v SUCCESS | wc -l | grep -q '^0$'",
+        "coverage": "echo 'Coverage handled by GitHub CI'"
+      },
+      "testReview": {
+        "tool": "mcp__codex__codex",
+        "blockOnSeverity": "LOW"
+      }
+    },
+    "final": {
+      "codexFinal": {
+        "tool": "mcp__codex-high__codex",
+        "blockOnSeverity": "LOW"
+      }
+    }
+  },
+  "git": {
+    "branchFormat": "{type}/{slug}",
+    "defaultType": "feat",
+    "mainBranch": "main"
+  }
+}
