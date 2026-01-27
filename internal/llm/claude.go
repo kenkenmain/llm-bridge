@@ -91,7 +91,7 @@ func (c *Claude) Start(ctx context.Context) error {
 	c.lastActivity = time.Now()
 
 	go func() {
-		c.cmd.Wait()
+		_ = c.cmd.Wait()
 		c.mu.Lock()
 		c.running = false
 		c.mu.Unlock()
@@ -109,7 +109,7 @@ func (c *Claude) Stop() error {
 	}
 
 	if err := c.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		c.cmd.Process.Kill()
+		_ = c.cmd.Process.Kill()
 	}
 
 	if c.ptmx != nil {

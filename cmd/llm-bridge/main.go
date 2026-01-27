@@ -99,8 +99,8 @@ func init() {
 	addRepoCmd.Flags().String("channel", "", "Channel ID")
 	addRepoCmd.Flags().String("llm", "claude", "LLM backend (claude, codex)")
 	addRepoCmd.Flags().String("dir", ".", "Working directory")
-	addRepoCmd.MarkFlagRequired("channel")
-	addRepoCmd.MarkFlagRequired("dir")
+	_ = addRepoCmd.MarkFlagRequired("channel")
+	_ = addRepoCmd.MarkFlagRequired("dir")
 }
 
 func main() {

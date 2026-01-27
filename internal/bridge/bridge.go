@@ -98,7 +98,7 @@ func (b *Bridge) Stop() error {
 
 	for _, repo := range b.repos {
 		if repo.llm != nil {
-			repo.llm.Stop()
+			_ = repo.llm.Stop()
 		}
 		if repo.cancelCtx != nil {
 			repo.cancelCtx()
@@ -106,7 +106,7 @@ func (b *Bridge) Stop() error {
 	}
 
 	for _, prov := range b.providers {
-		prov.Stop()
+		_ = prov.Stop()
 	}
 
 	return nil
@@ -163,13 +163,13 @@ func (b *Bridge) handleBridgeCommand(prov provider.Provider, channelID string, r
 		response = fmt.Sprintf("Unknown command: %s", route.Command)
 	}
 
-	prov.Send(channelID, response)
+	_ = prov.Send(channelID, response)
 }
 
 func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, msg provider.Message, route router.Route) {
 	repoName := b.repoForChannel(msg.ChannelID)
 	if repoName == "" {
-		prov.Send(msg.ChannelID, "No repo configured for this channel")
+		_ = prov.Send(msg.ChannelID, "No repo configured for this channel")
 		return
 	}
 
@@ -177,7 +177,7 @@ func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, m
 	session, err := b.getOrCreateSession(ctx, repoName, repo, prov)
 	if err != nil {
 		slog.Error("failed to create session", "error", err, "repo", repoName)
-		prov.Send(msg.ChannelID, fmt.Sprintf("Error starting LLM: %v", err))
+		_ = prov.Send(msg.ChannelID, fmt.Sprintf("Error starting LLM: %v", err))
 		return
 	}
 
@@ -190,7 +190,7 @@ func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, m
 
 	if err := session.llm.Send(llmMsg); err != nil {
 		slog.Error("send to llm failed", "error", err, "repo", repoName)
-		prov.Send(msg.ChannelID, fmt.Sprintf("Error: %v", err))
+		_ = prov.Send(msg.ChannelID, fmt.Sprintf("Error: %v", err))
 	}
 }
 
@@ -356,23 +356,23 @@ func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Term
 			for name := range b.cfg.Repos {
 				repos = append(repos, name)
 			}
-			term.Send("", fmt.Sprintf("Usage: /select <repo-name>\nAvailable repos: %v\nCurrently selected: %s", repos, b.getTerminalRepo()))
+			_ = term.Send("", fmt.Sprintf("Usage: /select <repo-name>\nAvailable repos: %v\nCurrently selected: %s", repos, b.getTerminalRepo()))
 			return
 		}
 		if _, ok := b.cfg.Repos[route.Args]; !ok {
-			term.Send("", fmt.Sprintf("Unknown repo: %s", route.Args))
+			_ = term.Send("", fmt.Sprintf("Unknown repo: %s", route.Args))
 			return
 		}
 		b.mu.Lock()
 		b.terminalRepoName = route.Args
 		b.mu.Unlock()
-		term.Send("", fmt.Sprintf("Selected repo: %s", route.Args))
+		_ = term.Send("", fmt.Sprintf("Selected repo: %s", route.Args))
 		return
 	}
 
 	repoName := b.getTerminalRepo()
 	if repoName == "" {
-		term.Send("", "No repos configured. Add repos to llm-bridge.yaml")
+		_ = term.Send("", "No repos configured. Add repos to llm-bridge.yaml")
 		return
 	}
 
@@ -385,7 +385,7 @@ func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Term
 		session, err := b.getOrCreateSession(ctx, repoName, repo, term)
 		if err != nil {
 			slog.Error("failed to create session", "error", err, "repo", repoName)
-			term.Send("", fmt.Sprintf("Error starting LLM: %v", err))
+			_ = term.Send("", fmt.Sprintf("Error starting LLM: %v", err))
 			return
 		}
 
@@ -397,7 +397,7 @@ func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Term
 
 		if err := session.llm.Send(llmMsg); err != nil {
 			slog.Error("send to llm failed", "error", err, "repo", repoName)
-			term.Send("", fmt.Sprintf("Error: %v", err))
+			_ = term.Send("", fmt.Sprintf("Error: %v", err))
 		}
 	}
 }
@@ -444,14 +444,14 @@ func (b *Bridge) checkIdleTimeouts(timeout time.Duration) {
 
 		if time.Since(session.llm.LastActivity()) > timeout {
 			slog.Info("stopping idle llm", "repo", name, "idle", time.Since(session.llm.LastActivity()))
-			session.llm.Stop()
+			_ = session.llm.Stop()
 			if session.cancelCtx != nil {
 				session.cancelCtx()
 			}
 			delete(b.repos, name)
 
 			for _, ch := range session.channels {
-				ch.provider.Send(ch.channelID, fmt.Sprintf("LLM stopped due to idle timeout (%v)", timeout))
+				_ = ch.provider.Send(ch.channelID, fmt.Sprintf("LLM stopped due to idle timeout (%v)", timeout))
 			}
 		}
 	}
