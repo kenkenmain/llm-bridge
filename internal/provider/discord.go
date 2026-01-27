@@ -43,7 +43,7 @@ func (d *Discord) Start(ctx context.Context) error {
 	}
 
 	d.session.AddHandler(d.handleMessage)
-	d.session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages
+	d.session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentMessageContent
 
 	if err := d.session.Open(); err != nil {
 		return fmt.Errorf("open session: %w", err)

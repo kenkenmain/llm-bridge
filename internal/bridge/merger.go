@@ -6,11 +6,12 @@ import (
 	"time"
 )
 
-// Merger handles input conflict detection and prefixing
+// Merger handles input conflict detection and prefixing.
+// When multiple sources send messages within the conflict window,
+// ALL messages get prefixed (not just the second one).
 type Merger struct {
 	mu          sync.Mutex
-	lastSource  string
-	lastTime    time.Time
+	sources     map[string]time.Time // track recent activity per source
 	conflictWin time.Duration
 }
 
@@ -19,30 +20,41 @@ func NewMerger(conflictWindow time.Duration) *Merger {
 		conflictWindow = 2 * time.Second
 	}
 	return &Merger{
+		sources:     make(map[string]time.Time),
 		conflictWin: conflictWindow,
 	}
 }
 
-// FormatMessage adds source prefix only if there's a conflict
-// (multiple sources sending within the conflict window)
+// FormatMessage adds source prefix when multiple sources are active
+// within the conflict window. This ensures BOTH/ALL messages get prefixed,
+// not just the second one.
 func (m *Merger) FormatMessage(source, content string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
-	needsPrefix := false
 
-	// Check if different source within conflict window
-	if m.lastSource != "" && m.lastSource != source {
-		if now.Sub(m.lastTime) < m.conflictWin {
-			needsPrefix = true
+	// Clean up stale sources
+	for src, t := range m.sources {
+		if now.Sub(t) >= m.conflictWin {
+			delete(m.sources, src)
 		}
 	}
 
-	m.lastSource = source
-	m.lastTime = now
+	// Check if we're in a conflict period (other sources recently active)
+	inConflict := false
+	for src := range m.sources {
+		if src != source {
+			inConflict = true
+			break
+		}
+	}
 
-	if needsPrefix {
+	// Record this source's activity
+	m.sources[source] = now
+
+	// Prefix if in conflict period
+	if inConflict {
 		return fmt.Sprintf("[%s] %s", source, content)
 	}
 	return content

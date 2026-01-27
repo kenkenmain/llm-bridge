@@ -20,7 +20,6 @@ type Bridge struct {
 	providers map[string]provider.Provider
 	repos     map[string]*repoSession
 	output    *output.Handler
-	merger    *Merger
 
 	mu               sync.Mutex
 	terminalRepoName string
@@ -31,6 +30,7 @@ type repoSession struct {
 	llm       llm.LLM
 	channels  []channelRef
 	cancelCtx context.CancelFunc
+	merger    *Merger // per-repo conflict detection
 }
 
 type channelRef struct {
@@ -44,7 +44,6 @@ func New(cfg *config.Config) *Bridge {
 		providers: make(map[string]provider.Provider),
 		repos:     make(map[string]*repoSession),
 		output:    output.NewHandler(cfg.Defaults.OutputThreshold),
-		merger:    NewMerger(2 * time.Second),
 	}
 }
 
@@ -182,7 +181,7 @@ func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, m
 		return
 	}
 
-	formatted := b.merger.FormatMessage(prov.Name(), route.Raw)
+	formatted := session.merger.FormatMessage(prov.Name(), route.Raw)
 
 	llmMsg := llm.Message{
 		Source:  prov.Name(),
@@ -226,6 +225,7 @@ func (b *Bridge) getOrCreateSession(ctx context.Context, repoName string, repo c
 		llm:       llmInstance,
 		channels:  []channelRef{{provider: prov, channelID: repo.ChannelID}},
 		cancelCtx: cancel,
+		merger:    NewMerger(2 * time.Second),
 	}
 	b.repos[repoName] = session
 
@@ -256,6 +256,23 @@ func (b *Bridge) readOutput(session *repoSession, repoName string) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
+	// Use goroutine for non-blocking reads
+	type readResult struct {
+		line string
+		err  error
+	}
+	lines := make(chan readResult)
+	go func() {
+		defer close(lines)
+		for {
+			line, err := reader.ReadString('\n')
+			lines <- readResult{line, err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ticker.C:
@@ -263,17 +280,25 @@ func (b *Bridge) readOutput(session *repoSession, repoName string) {
 				b.broadcastOutput(session, buffer)
 				buffer = ""
 			}
-		default:
-			line, err := reader.ReadString('\n')
-			if err != nil {
+		case result, ok := <-lines:
+			if !ok {
+				// Channel closed
 				if buffer != "" {
 					b.broadcastOutput(session, buffer)
 				}
 				slog.Info("llm output ended", "repo", repoName)
 				return
 			}
-			buffer += line
-
+			if result.err != nil {
+				// Include any partial line before error
+				buffer += result.line
+				if buffer != "" {
+					b.broadcastOutput(session, buffer)
+				}
+				slog.Info("llm output ended", "repo", repoName, "error", result.err)
+				return
+			}
+			buffer += result.line
 			session.llm.UpdateActivity()
 
 			if len(buffer) > b.cfg.Defaults.OutputThreshold {
@@ -364,7 +389,7 @@ func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Term
 			return
 		}
 
-		formatted := b.merger.FormatMessage(term.Name(), route.Raw)
+		formatted := session.merger.FormatMessage(term.Name(), route.Raw)
 		llmMsg := llm.Message{
 			Source:  term.Name(),
 			Content: formatted,
