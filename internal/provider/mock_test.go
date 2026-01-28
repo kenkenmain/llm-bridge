@@ -45,7 +45,7 @@ func TestMockProvider_Stop(t *testing.T) {
 
 func TestMockProvider_StopIdempotent(t *testing.T) {
 	m := NewMockProvider("test")
-	m.Stop()
+	_ = m.Stop()
 	err := m.Stop()
 	if err != nil {
 		t.Errorf("second Stop() error = %v", err)
@@ -115,7 +115,7 @@ func TestMockProvider_SimulateMessage(t *testing.T) {
 
 func TestMockProvider_SimulateMessageAfterStop(t *testing.T) {
 	m := NewMockProvider("test")
-	m.Stop()
+	_ = m.Stop()
 
 	// Should not panic
 	m.SimulateMessage(Message{Content: "test"})

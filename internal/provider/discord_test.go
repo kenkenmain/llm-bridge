@@ -54,7 +54,7 @@ func TestDiscord_Stop_BeforeStart(t *testing.T) {
 func TestDiscord_Stop_Idempotent(t *testing.T) {
 	d := NewDiscord("token", []string{"channel-1"})
 
-	d.Stop()
+	_ = d.Stop()
 	err := d.Stop()
 	if err != nil {
 		t.Errorf("second Stop() error = %v", err)

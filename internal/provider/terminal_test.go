@@ -145,7 +145,7 @@ func TestTerminal_StopPreventsSend(t *testing.T) {
 	}
 
 	// Send a message
-	pw.Write([]byte("line1\n"))
+	_, _ = pw.Write([]byte("line1\n"))
 	time.Sleep(20 * time.Millisecond)
 
 	// Stop the terminal
