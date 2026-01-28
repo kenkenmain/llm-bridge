@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthropics/llm-bridge/internal/config"
 	"github.com/anthropics/llm-bridge/internal/provider"
+	"github.com/anthropics/llm-bridge/internal/router"
 )
 
 func testConfig() *config.Config {
@@ -220,24 +221,17 @@ func TestBridge_HandleBridgeCommand_Help(t *testing.T) {
 
 	mockProv := provider.NewMockProvider("discord")
 
-	route := struct {
-		Command string
-		Args    string
-	}{Command: "help"}
+	route := router.Route{
+		Type:    router.RouteToBridge,
+		Command: "help",
+	}
 
-	b.handleBridgeCommand(mockProv, "channel-123", struct {
-		Type    int
-		Command string
-		Args    string
-		Raw     string
-	}{Command: "help"})
+	b.handleBridgeCommand(mockProv, "channel-123", route)
 
 	msgs := mockProv.GetSentMessages()
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-
-	_ = route // avoid unused
 }
 
 func TestBridge_Stop(t *testing.T) {
