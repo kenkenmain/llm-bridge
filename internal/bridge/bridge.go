@@ -62,20 +62,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}
 	}
 
-	// Initialize Telegram if configured
-	if b.cfg.Providers.Telegram.BotToken != "" {
-		channelIDs := b.channelIDsForProvider("telegram")
-		if len(channelIDs) > 0 {
-			telegram := provider.NewTelegram(b.cfg.Providers.Telegram.BotToken, channelIDs)
-			if err := telegram.Start(ctx); err != nil {
-				return fmt.Errorf("start telegram: %w", err)
-			}
-			b.providers["telegram"] = telegram
-			go b.handleMessages(ctx, telegram)
-			slog.Info("telegram provider started", "channels", len(channelIDs))
-		}
-	}
-
 	// Initialize Terminal (always enabled for local interaction)
 	terminal := provider.NewTerminal("terminal")
 	if err := terminal.Start(ctx); err != nil {

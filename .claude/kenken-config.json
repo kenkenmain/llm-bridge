@@ -9,6 +9,9 @@
       }
     },
     "implement": {
+      "implementation": {
+        "tool": "mcp__codex-high__codex"
+      },
       "implementReview": {
         "tool": "mcp__codex__codex",
         "maxRetries": 3,
@@ -18,10 +21,11 @@
     "test": {
       "enabled": true,
       "instructions": "Create a PR to trigger GitHub CI. Steps: 1) Create feature branch if not already on one, 2) Commit changes, 3) Push and create PR: gh pr create --title 'feat: <description>' --body '...', 4) Add 'ci' label to trigger CI: gh pr edit --add-label ci, 5) Wait for CI: gh pr checks --watch, 6) If CI fails, fix issues, push, and wait again, 7) Only proceed when all PR checks are green.",
+      "coverageThreshold": 90,
       "commands": {
         "lint": "echo 'Linting handled by GitHub CI'",
         "test": "gh pr checks --json state -q '.[].state' | grep -v SUCCESS | wc -l | grep -q '^0$'",
-        "coverage": "echo 'Coverage handled by GitHub CI'"
+        "coverage": "echo 'Coverage handled by GitHub CI - threshold 90%'"
       },
       "testReview": {
         "tool": "mcp__codex__codex",

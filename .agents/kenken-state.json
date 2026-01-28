@@ -7,8 +7,14 @@
   "stages": {
     "plan": { "status": "completed", "phase": "1.3", "retryCount": 2 },
     "implement": { "status": "completed", "phase": "2.3", "retryCount": 0 },
-    "test": { "status": "skipped", "enabled": false },
+    "test": { "status": "completed", "enabled": true, "note": "CI-based testing via GitHub Actions PR #9" },
     "final": { "status": "in_progress", "phase": "4.1" }
   },
-  "extensions": []
+  "extensions": [],
+  "pr": {
+    "number": 9,
+    "url": "https://github.com/kenkenmain/llm-bridge/pull/9",
+    "branch": "feat/llm-bridge-initial",
+    "ciStatus": "passed"
+  }
 }
