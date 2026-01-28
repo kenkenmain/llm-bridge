@@ -56,19 +56,24 @@ func (t *Telegram) Start(ctx context.Context) error {
 			return nil
 		}
 
-		t.mu.Lock()
-		stopped := t.stopped
-		t.mu.Unlock()
-
-		if stopped {
-			return nil
-		}
-
-		t.messages <- Message{
+		msg := Message{
 			ChannelID: chatID,
 			Content:   c.Text(),
 			Author:    c.Sender().Username,
 			Source:    "telegram",
+		}
+
+		t.mu.Lock()
+		defer t.mu.Unlock()
+
+		if t.stopped {
+			return nil
+		}
+
+		select {
+		case t.messages <- msg:
+		default:
+			// Channel full or closed, drop message
 		}
 		return nil
 	})
