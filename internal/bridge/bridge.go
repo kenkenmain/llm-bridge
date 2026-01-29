@@ -15,11 +15,15 @@ import (
 	"github.com/anthropics/llm-bridge/internal/router"
 )
 
+// LLMFactory creates LLM instances. Defaults to llm.New.
+type LLMFactory func(backend, workingDir, claudePath string, resume bool) (llm.LLM, error)
+
 type Bridge struct {
-	cfg       *config.Config
-	providers map[string]provider.Provider
-	repos     map[string]*repoSession
-	output    *output.Handler
+	cfg        *config.Config
+	providers  map[string]provider.Provider
+	repos      map[string]*repoSession
+	output     *output.Handler
+	llmFactory LLMFactory
 
 	mu               sync.Mutex
 	terminalRepoName string
@@ -40,10 +44,11 @@ type channelRef struct {
 
 func New(cfg *config.Config) *Bridge {
 	return &Bridge{
-		cfg:       cfg,
-		providers: make(map[string]provider.Provider),
-		repos:     make(map[string]*repoSession),
-		output:    output.NewHandler(cfg.Defaults.OutputThreshold),
+		cfg:        cfg,
+		providers:  make(map[string]provider.Provider),
+		repos:      make(map[string]*repoSession),
+		output:     output.NewHandler(cfg.Defaults.OutputThreshold),
+		llmFactory: llm.New,
 	}
 }
 
@@ -194,7 +199,7 @@ func (b *Bridge) getOrCreateSession(ctx context.Context, repoName string, repo c
 		llmBackend = b.cfg.Defaults.LLM
 	}
 
-	llmInstance, err := llm.New(llmBackend, repo.WorkingDir, b.cfg.Defaults.GetClaudePath(), b.cfg.Defaults.GetResumeSession())
+	llmInstance, err := b.llmFactory(llmBackend, repo.WorkingDir, b.cfg.Defaults.GetClaudePath(), b.cfg.Defaults.GetResumeSession())
 	if err != nil {
 		return nil, fmt.Errorf("create llm: %w", err)
 	}
