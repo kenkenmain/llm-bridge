@@ -133,7 +133,7 @@ func TestClaude_Start_WithRealProcess(t *testing.T) {
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer c.Stop()
+	defer func() { _ = c.Stop() }()
 
 	if !c.Running() {
 		t.Error("Running() should be true after Start")
@@ -161,7 +161,7 @@ func TestClaude_Start_AlreadyRunning(t *testing.T) {
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("first Start() error = %v", err)
 	}
-	defer c.Stop()
+	defer func() { _ = c.Stop() }()
 
 	// Second start should be no-op
 	if err := c.Start(ctx); err != nil {
@@ -176,7 +176,7 @@ func TestClaude_Start_InvalidCommand(t *testing.T) {
 	err := c.Start(ctx)
 	if err == nil {
 		t.Error("Start() should error for invalid command")
-		c.Stop()
+		_ = c.Stop()
 	}
 }
 
@@ -208,7 +208,7 @@ func TestClaude_Send_Running(t *testing.T) {
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer c.Stop()
+	defer func() { _ = c.Stop() }()
 
 	// Send should update activity
 	before := c.LastActivity()
@@ -225,12 +225,8 @@ func TestClaude_Send_Running(t *testing.T) {
 }
 
 func TestClaude_Cancel_Running(t *testing.T) {
-	// Use 'sleep' which will respond to SIGINT
-	c := NewClaude(WithClaudePath("sleep"), WithResume(false))
-	// Note: sleep doesn't take --resume, so we need to override args
-	// Actually, let's use cat which also responds to signals
-
-	c = NewClaude(WithClaudePath("cat"), WithResume(false))
+	// Use 'cat' which responds to signals
+	c := NewClaude(WithClaudePath("cat"), WithResume(false))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -238,7 +234,7 @@ func TestClaude_Cancel_Running(t *testing.T) {
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer c.Stop()
+	defer func() { _ = c.Stop() }()
 
 	// Cancel should send SIGINT
 	if err := c.Cancel(); err != nil {

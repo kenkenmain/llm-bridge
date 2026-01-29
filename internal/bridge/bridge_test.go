@@ -761,7 +761,7 @@ func TestBridge_HandleMessages_ChannelClosed(t *testing.T) {
 		done <- true
 	}()
 
-	mockProv.Stop() // Closes the messages channel
+	_ = mockProv.Stop() // Closes the messages channel
 
 	select {
 	case <-done:
