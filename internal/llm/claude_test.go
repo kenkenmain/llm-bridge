@@ -254,3 +254,76 @@ func TestClaude_WithResumeFlag(t *testing.T) {
 		t.Error("resumeSession should be false")
 	}
 }
+
+func TestClaude_Stop_DoubleStop(t *testing.T) {
+	c := NewClaude(WithClaudePath("cat"), WithResume(false))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// First stop
+	if err := c.Stop(); err != nil {
+		t.Errorf("first Stop() error = %v", err)
+	}
+
+	// Second stop should not panic due to sync.Once
+	if err := c.Stop(); err != nil {
+		t.Errorf("second Stop() error = %v", err)
+	}
+}
+
+func TestClaude_ProcessExitsCleanup(t *testing.T) {
+	// Use 'echo' which exits immediately after printing
+	c := NewClaude(WithClaudePath("echo"), WithResume(false))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Wait for process to exit naturally
+	time.Sleep(100 * time.Millisecond)
+
+	// Running should be false after process exits
+	if c.Running() {
+		t.Error("Running() should be false after process exits")
+	}
+
+	// Stop should still be safe to call (tests closeOnce)
+	if err := c.Stop(); err != nil {
+		t.Errorf("Stop() after process exit error = %v", err)
+	}
+}
+
+func TestClaude_RestartAfterStop(t *testing.T) {
+	c := NewClaude(WithClaudePath("cat"), WithResume(false))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// First start
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("first Start() error = %v", err)
+	}
+
+	// Stop
+	if err := c.Stop(); err != nil {
+		t.Errorf("Stop() error = %v", err)
+	}
+
+	// Second start should work (closeOnce should be reset)
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("second Start() error = %v", err)
+	}
+	defer func() { _ = c.Stop() }()
+
+	if !c.Running() {
+		t.Error("Running() should be true after restart")
+	}
+}

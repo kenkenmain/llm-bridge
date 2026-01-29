@@ -259,12 +259,13 @@ func (b *Bridge) readOutput(session *repoSession, repoName string) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Use goroutine for non-blocking reads
+	// Use goroutine for non-blocking reads with buffered channel
+	// to prevent PTY backpressure when broadcast is slow
 	type readResult struct {
 		line string
 		err  error
 	}
-	lines := make(chan readResult)
+	lines := make(chan readResult, 100) // Buffer to prevent blocking on slow broadcasts
 	go func() {
 		defer close(lines)
 		for {
@@ -437,25 +438,41 @@ func (b *Bridge) idleTimeoutLoop(ctx context.Context) {
 }
 
 func (b *Bridge) checkIdleTimeouts(timeout time.Duration) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	// Collect sessions to stop under lock, then release lock before stopping
+	// to avoid blocking message handling and session creation
+	type idleSession struct {
+		name     string
+		session  *repoSession
+		channels []channelRef
+	}
+	var toStop []idleSession
 
+	b.mu.Lock()
 	for name, session := range b.repos {
 		if session.llm == nil || !session.llm.Running() {
 			continue
 		}
 
 		if time.Since(session.llm.LastActivity()) > timeout {
-			slog.Info("stopping idle llm", "repo", name, "idle", time.Since(session.llm.LastActivity()))
-			_ = session.llm.Stop()
-			if session.cancelCtx != nil {
-				session.cancelCtx()
-			}
+			// Copy channels slice while holding lock
+			channels := make([]channelRef, len(session.channels))
+			copy(channels, session.channels)
+			toStop = append(toStop, idleSession{name, session, channels})
 			delete(b.repos, name)
+		}
+	}
+	b.mu.Unlock()
 
-			for _, ch := range session.channels {
-				_ = ch.provider.Send(ch.channelID, fmt.Sprintf("LLM stopped due to idle timeout (%v)", timeout))
-			}
+	// Stop sessions and notify channels outside the lock
+	for _, idle := range toStop {
+		slog.Info("stopping idle llm", "repo", idle.name, "idle", time.Since(idle.session.llm.LastActivity()))
+		_ = idle.session.llm.Stop()
+		if idle.session.cancelCtx != nil {
+			idle.session.cancelCtx()
+		}
+
+		for _, ch := range idle.channels {
+			_ = ch.provider.Send(ch.channelID, fmt.Sprintf("LLM stopped due to idle timeout (%v)", timeout))
 		}
 	}
 }

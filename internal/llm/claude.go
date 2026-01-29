@@ -23,6 +23,7 @@ type Claude struct {
 	ptmx         *os.File
 	running      bool
 	lastActivity time.Time
+	closeOnce    sync.Once // Ensures ptmx is closed only once
 }
 
 type ClaudeOption func(*Claude)
@@ -89,11 +90,19 @@ func (c *Claude) Start(ctx context.Context) error {
 
 	c.running = true
 	c.lastActivity = time.Now()
+	c.closeOnce = sync.Once{} // Reset for new process
 
 	go func() {
 		_ = c.cmd.Wait()
 		c.mu.Lock()
 		c.running = false
+		// Close ptmx when process exits to prevent file descriptor leak
+		c.closeOnce.Do(func() {
+			if c.ptmx != nil {
+				c.ptmx.Close()
+				c.ptmx = nil
+			}
+		})
 		c.mu.Unlock()
 	}()
 
@@ -112,9 +121,13 @@ func (c *Claude) Stop() error {
 		_ = c.cmd.Process.Kill()
 	}
 
-	if c.ptmx != nil {
-		c.ptmx.Close()
-	}
+	// Close ptmx using sync.Once to prevent double-close
+	c.closeOnce.Do(func() {
+		if c.ptmx != nil {
+			c.ptmx.Close()
+			c.ptmx = nil
+		}
+	})
 
 	c.running = false
 	return nil
