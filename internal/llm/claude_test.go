@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -115,5 +116,145 @@ func TestClaude_Cancel_NotRunning(t *testing.T) {
 	// Cancel should be safe when not running
 	if err := c.Cancel(); err != nil {
 		t.Errorf("Cancel() when not running should not error, got %v", err)
+	}
+}
+
+func TestClaude_Start_WithRealProcess(t *testing.T) {
+	// Use 'cat' as a simple process that reads stdin and writes to stdout
+	c := NewClaude(
+		WithClaudePath("cat"),
+		WithWorkingDir("/tmp"),
+		WithResume(false), // cat doesn't support --resume
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer c.Stop()
+
+	if !c.Running() {
+		t.Error("Running() should be true after Start")
+	}
+
+	// Send a message
+	err := c.Send(Message{Content: "hello"})
+	if err != nil {
+		t.Errorf("Send() error = %v", err)
+	}
+
+	// Output should be readable
+	out := c.Output()
+	if out == nil {
+		t.Error("Output() should not be nil when running")
+	}
+}
+
+func TestClaude_Start_AlreadyRunning(t *testing.T) {
+	c := NewClaude(WithClaudePath("cat"), WithResume(false))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("first Start() error = %v", err)
+	}
+	defer c.Stop()
+
+	// Second start should be no-op
+	if err := c.Start(ctx); err != nil {
+		t.Errorf("second Start() error = %v", err)
+	}
+}
+
+func TestClaude_Start_InvalidCommand(t *testing.T) {
+	c := NewClaude(WithClaudePath("/nonexistent/command"), WithResume(false))
+
+	ctx := context.Background()
+	err := c.Start(ctx)
+	if err == nil {
+		t.Error("Start() should error for invalid command")
+		c.Stop()
+	}
+}
+
+func TestClaude_Stop_Running(t *testing.T) {
+	c := NewClaude(WithClaudePath("cat"), WithResume(false))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if err := c.Stop(); err != nil {
+		t.Errorf("Stop() error = %v", err)
+	}
+
+	if c.Running() {
+		t.Error("Running() should be false after Stop")
+	}
+}
+
+func TestClaude_Send_Running(t *testing.T) {
+	c := NewClaude(WithClaudePath("cat"), WithResume(false))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer c.Stop()
+
+	// Send should update activity
+	before := c.LastActivity()
+	time.Sleep(10 * time.Millisecond)
+
+	if err := c.Send(Message{Content: "test message"}); err != nil {
+		t.Errorf("Send() error = %v", err)
+	}
+
+	after := c.LastActivity()
+	if !after.After(before) {
+		t.Error("Send should update LastActivity")
+	}
+}
+
+func TestClaude_Cancel_Running(t *testing.T) {
+	// Use 'sleep' which will respond to SIGINT
+	c := NewClaude(WithClaudePath("sleep"), WithResume(false))
+	// Note: sleep doesn't take --resume, so we need to override args
+	// Actually, let's use cat which also responds to signals
+
+	c = NewClaude(WithClaudePath("cat"), WithResume(false))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer c.Stop()
+
+	// Cancel should send SIGINT
+	if err := c.Cancel(); err != nil {
+		t.Errorf("Cancel() error = %v", err)
+	}
+}
+
+func TestClaude_WithResumeFlag(t *testing.T) {
+	// Test that --resume flag is added when resumeSession is true
+	c := NewClaude(WithResume(true))
+	if !c.resumeSession {
+		t.Error("resumeSession should be true")
+	}
+
+	c = NewClaude(WithResume(false))
+	if c.resumeSession {
+		t.Error("resumeSession should be false")
 	}
 }
