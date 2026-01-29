@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/llm-bridge/internal/llm"
 	"github.com/anthropics/llm-bridge/internal/output"
 	"github.com/anthropics/llm-bridge/internal/provider"
+	"github.com/anthropics/llm-bridge/internal/ratelimit"
 	"github.com/anthropics/llm-bridge/internal/router"
 )
 
@@ -31,7 +32,10 @@ type Bridge struct {
 	output          *output.Handler
 	discordFactory  DiscordFactory
 	terminalFactory TerminalFactory
-	llmFactory LLMFactory
+	llmFactory      LLMFactory
+
+	userLimiter    *ratelimit.Limiter
+	channelLimiter *ratelimit.Limiter
 
 	mu               sync.Mutex
 	terminalRepoName string
@@ -51,7 +55,7 @@ type channelRef struct {
 }
 
 func New(cfg *config.Config) *Bridge {
-	return &Bridge{
+	b := &Bridge{
 		cfg:       cfg,
 		providers: make(map[string]provider.Provider),
 		repos:     make(map[string]*repoSession),
@@ -62,6 +66,19 @@ func New(cfg *config.Config) *Bridge {
 		},
 		terminalFactory: provider.NewTerminal,
 	}
+
+	if cfg.Defaults.RateLimit.GetRateLimitEnabled() {
+		b.userLimiter = ratelimit.NewLimiter(ratelimit.Config{
+			Rate:  cfg.Defaults.RateLimit.GetUserRate(),
+			Burst: cfg.Defaults.RateLimit.GetUserBurst(),
+		})
+		b.channelLimiter = ratelimit.NewLimiter(ratelimit.Config{
+			Rate:  cfg.Defaults.RateLimit.GetChannelRate(),
+			Burst: cfg.Defaults.RateLimit.GetChannelBurst(),
+		})
+	}
+
+	return b
 }
 
 func (b *Bridge) Start(ctx context.Context) error {
@@ -146,8 +163,35 @@ func (b *Bridge) processMessage(ctx context.Context, prov provider.Provider, msg
 	case router.RouteToBridge:
 		b.handleBridgeCommand(prov, msg.ChannelID, route)
 	case router.RouteToLLM:
+		if b.isRateLimited(prov, msg) {
+			return
+		}
 		b.handleLLMMessage(ctx, prov, msg, route)
 	}
+}
+
+// isRateLimited checks per-user and per-channel rate limits.
+// Returns true if the message should be rejected.
+// User rate limiting uses AuthorID (stable unique ID), so terminal messages
+// (which have empty AuthorID) are implicitly not user-rate-limited.
+func (b *Bridge) isRateLimited(prov provider.Provider, msg provider.Message) bool {
+	if b.userLimiter == nil || b.channelLimiter == nil {
+		return false
+	}
+
+	if msg.AuthorID != "" && !b.userLimiter.Allow(msg.AuthorID) {
+		_ = prov.Send(msg.ChannelID, fmt.Sprintf("Rate limited: too many messages from user %s. Please wait.", msg.Author))
+		slog.Warn("rate limited user", "user", msg.Author, "author_id", msg.AuthorID, "channel", msg.ChannelID)
+		return true
+	}
+
+	if !b.channelLimiter.Allow(msg.ChannelID) {
+		_ = prov.Send(msg.ChannelID, "Rate limited: too many messages in this channel. Please wait.")
+		slog.Warn("rate limited channel", "channel", msg.ChannelID)
+		return true
+	}
+
+	return false
 }
 
 func (b *Bridge) handleBridgeCommand(prov provider.Provider, channelID string, route router.Route) {

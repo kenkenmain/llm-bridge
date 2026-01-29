@@ -20,6 +20,12 @@ defaults:
   output_threshold: 1500
   idle_timeout: 10m
   resume_session: true
+  rate_limit:
+    enabled: true
+    user_rate: 0.5       # messages per second per user (1 every 2 seconds)
+    user_burst: 3        # allow burst of 3 rapid messages per user
+    channel_rate: 2.0    # messages per second per channel
+    channel_burst: 10    # allow burst of 10 rapid messages per channel
 
 providers:
   discord:

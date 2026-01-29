@@ -81,6 +81,7 @@ func (d *Discord) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate
 		ChannelID: m.ChannelID,
 		Content:   m.Content,
 		Author:    m.Author.Username,
+		AuthorID:  m.Author.ID,
 		Source:    "discord",
 	}
 

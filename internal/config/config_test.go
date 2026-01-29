@@ -206,3 +206,110 @@ func TestDefaultPath(t *testing.T) {
 		t.Errorf("DefaultPath() = %q, want %q", got, "llm-bridge.yaml")
 	}
 }
+
+// Rate limit config tests
+
+func TestRateLimitConfig_Defaults(t *testing.T) {
+	// Zero-value config should return sensible defaults
+	var rl RateLimitConfig
+
+	if got := rl.GetRateLimitEnabled(); got != true {
+		t.Errorf("GetRateLimitEnabled() = %v, want true", got)
+	}
+	if got := rl.GetUserRate(); got != 0.5 {
+		t.Errorf("GetUserRate() = %v, want 0.5", got)
+	}
+	if got := rl.GetUserBurst(); got != 3 {
+		t.Errorf("GetUserBurst() = %v, want 3", got)
+	}
+	if got := rl.GetChannelRate(); got != 2.0 {
+		t.Errorf("GetChannelRate() = %v, want 2.0", got)
+	}
+	if got := rl.GetChannelBurst(); got != 10 {
+		t.Errorf("GetChannelBurst() = %v, want 10", got)
+	}
+}
+
+func TestRateLimitConfig_CustomValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+defaults:
+  rate_limit:
+    enabled: true
+    user_rate: 1.0
+    user_burst: 5
+    channel_rate: 5.0
+    channel_burst: 20
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	rl := cfg.Defaults.RateLimit
+	if got := rl.GetUserRate(); got != 1.0 {
+		t.Errorf("GetUserRate() = %v, want 1.0", got)
+	}
+	if got := rl.GetUserBurst(); got != 5 {
+		t.Errorf("GetUserBurst() = %v, want 5", got)
+	}
+	if got := rl.GetChannelRate(); got != 5.0 {
+		t.Errorf("GetChannelRate() = %v, want 5.0", got)
+	}
+	if got := rl.GetChannelBurst(); got != 20 {
+		t.Errorf("GetChannelBurst() = %v, want 20", got)
+	}
+}
+
+func TestRateLimitConfig_EnabledDefault(t *testing.T) {
+	// nil Enabled should default to true
+	rl := RateLimitConfig{}
+	if got := rl.GetRateLimitEnabled(); got != true {
+		t.Errorf("nil Enabled should default to true, got %v", got)
+	}
+
+	// Explicit true
+	valTrue := true
+	rl = RateLimitConfig{Enabled: &valTrue}
+	if got := rl.GetRateLimitEnabled(); got != true {
+		t.Errorf("explicit true should return true, got %v", got)
+	}
+
+	// Explicit false
+	valFalse := false
+	rl = RateLimitConfig{Enabled: &valFalse}
+	if got := rl.GetRateLimitEnabled(); got != false {
+		t.Errorf("explicit false should return false, got %v", got)
+	}
+}
+
+func TestRateLimitConfig_DisabledViaYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+defaults:
+  rate_limit:
+    enabled: false
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Defaults.RateLimit.GetRateLimitEnabled() {
+		t.Error("rate limiting should be disabled when enabled: false in YAML")
+	}
+}

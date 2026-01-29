@@ -8,7 +8,8 @@ import (
 type Message struct {
 	ChannelID string
 	Content   string
-	Author    string
+	Author    string // display name (for logging/UI)
+	AuthorID  string // stable unique identifier (for rate limiting)
 	Source    string // provider name
 }
 
