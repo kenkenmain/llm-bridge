@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -1051,4 +1052,305 @@ func TestBridge_ProcessTerminalMessage_SessionCreateError(t *testing.T) {
 
 	b.processTerminalMessage(context.Background(), term, msg)
 	// Should not panic - error goes to terminal
+}
+
+// Tests for Start method
+func TestBridge_Start_NoProviders(t *testing.T) {
+	cfg := &config.Config{
+		Repos:    map[string]config.RepoConfig{},
+		Defaults: config.Defaults{IdleTimeout: "10m"},
+	}
+	b := New(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// Start should run and return after context is done
+	err := b.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+}
+
+func TestBridge_Start_WithTerminal(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := b.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Terminal provider should have been started
+	if _, ok := b.providers["terminal"]; !ok {
+		t.Error("terminal provider should be registered")
+	}
+}
+
+func TestBridge_Start_WithDiscord(t *testing.T) {
+	cfg := testConfig()
+	cfg.Providers.Discord.BotToken = "test-token"
+
+	b := New(cfg)
+
+	// Inject mock discord factory
+	mockDiscord := provider.NewMockProvider("discord")
+	b.discordFactory = func(token string, channelIDs []string) provider.Provider {
+		return mockDiscord
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := b.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Discord provider should have been started
+	if _, ok := b.providers["discord"]; !ok {
+		t.Error("discord provider should be registered")
+	}
+	if !mockDiscord.WasStartCalled() {
+		t.Error("discord Start should have been called")
+	}
+}
+
+func TestBridge_Start_DiscordError(t *testing.T) {
+	cfg := testConfig()
+	cfg.Providers.Discord.BotToken = "test-token"
+
+	b := New(cfg)
+
+	// Inject mock discord factory that returns error
+	mockDiscord := provider.NewMockProvider("discord")
+	mockDiscord.SetStartError(fmt.Errorf("connection failed"))
+	b.discordFactory = func(token string, channelIDs []string) provider.Provider {
+		return mockDiscord
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := b.Start(ctx)
+	if err == nil {
+		t.Error("Start() should return error when discord fails")
+	}
+	if !strings.Contains(err.Error(), "discord") {
+		t.Errorf("error should mention discord, got: %v", err)
+	}
+}
+
+func TestBridge_Start_NoChannelsForDiscord(t *testing.T) {
+	cfg := testConfig()
+	cfg.Providers.Discord.BotToken = "test-token"
+	// Change all repos to use telegram (not configured)
+	for name, repo := range cfg.Repos {
+		repo.Provider = "telegram"
+		cfg.Repos[name] = repo
+	}
+
+	b := New(cfg)
+
+	// Discord factory should not be called since no channels use discord
+	discordFactoryCalled := false
+	b.discordFactory = func(token string, channelIDs []string) provider.Provider {
+		discordFactoryCalled = true
+		return provider.NewMockProvider("discord")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_ = b.Start(ctx)
+
+	if discordFactoryCalled {
+		t.Error("discord factory should not be called when no channels use discord")
+	}
+}
+
+// Tests for handleTerminalMessages
+func TestBridge_HandleTerminalMessages_ContextCancel(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	term := provider.NewTerminal("terminal")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan bool)
+	go func() {
+		b.handleTerminalMessages(ctx, term)
+		done <- true
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// handleTerminalMessages exited
+	case <-time.After(100 * time.Millisecond):
+		t.Error("handleTerminalMessages should exit when context is cancelled")
+	}
+}
+
+func TestBridge_HandleTerminalMessages_ChannelClosed(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	term := provider.NewTerminal("terminal")
+	ctx := context.Background()
+
+	done := make(chan bool)
+	go func() {
+		b.handleTerminalMessages(ctx, term)
+		done <- true
+	}()
+
+	_ = term.Stop() // Closes the messages channel
+
+	select {
+	case <-done:
+		// handleTerminalMessages exited
+	case <-time.After(100 * time.Millisecond):
+		t.Error("handleTerminalMessages should exit when channel is closed")
+	}
+}
+
+// Tests for idleTimeoutLoop
+func TestBridge_IdleTimeoutLoop_ContextCancel(t *testing.T) {
+	cfg := testConfig()
+	cfg.Defaults.IdleTimeout = "1ms" // Very short for testing
+	b := New(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan bool)
+	go func() {
+		b.idleTimeoutLoop(ctx)
+		done <- true
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// idleTimeoutLoop exited
+	case <-time.After(100 * time.Millisecond):
+		t.Error("idleTimeoutLoop should exit when context is cancelled")
+	}
+}
+
+// Tests for readOutput
+func TestBridge_ReadOutput_NilOutput(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	// Output returns nil by default
+
+	session := &repoSession{
+		name: "test-repo",
+		llm:  mockLLM,
+	}
+
+	// Should return early without panic
+	done := make(chan bool)
+	go func() {
+		b.readOutput(session, "test-repo")
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// readOutput returned
+	case <-time.After(100 * time.Millisecond):
+		t.Error("readOutput should return immediately when output is nil")
+	}
+}
+
+func TestBridge_ReadOutput_WithOutput(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+
+	// Create a pipe for simulating output
+	pr, pw := io.Pipe()
+	mockLLM.SetOutput(pr)
+
+	mockProv := provider.NewMockProvider("test")
+	_ = mockProv.Start(context.Background())
+
+	session := &repoSession{
+		name:     "test-repo",
+		llm:      mockLLM,
+		channels: []channelRef{{provider: mockProv, channelID: "channel-123"}},
+		merger:   NewMerger(2 * time.Second),
+	}
+
+	done := make(chan bool)
+	go func() {
+		b.readOutput(session, "test-repo")
+		done <- true
+	}()
+
+	// Write some output and close
+	_, _ = pw.Write([]byte("Hello, world!\n"))
+	pw.Close()
+
+	select {
+	case <-done:
+		// readOutput returned
+	case <-time.After(500 * time.Millisecond):
+		t.Error("readOutput should return when pipe is closed")
+	}
+
+	// Verify output was broadcast
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) == 0 {
+		t.Error("expected output to be broadcast")
+	}
+}
+
+func TestBridge_ReadOutput_BufferFlush(t *testing.T) {
+	cfg := testConfig()
+	cfg.Defaults.OutputThreshold = 10 // Very small threshold
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+
+	pr, pw := io.Pipe()
+	mockLLM.SetOutput(pr)
+
+	mockProv := provider.NewMockProvider("test")
+	_ = mockProv.Start(context.Background())
+
+	session := &repoSession{
+		name:     "test-repo",
+		llm:      mockLLM,
+		channels: []channelRef{{provider: mockProv, channelID: "channel-123"}},
+		merger:   NewMerger(2 * time.Second),
+	}
+
+	done := make(chan bool)
+	go func() {
+		b.readOutput(session, "test-repo")
+		done <- true
+	}()
+
+	// Write more than threshold
+	_, _ = pw.Write([]byte("This is a longer message that exceeds the threshold\n"))
+	pw.Close()
+
+	select {
+	case <-done:
+		// readOutput returned
+	case <-time.After(500 * time.Millisecond):
+		t.Error("readOutput should return when pipe is closed")
+	}
 }

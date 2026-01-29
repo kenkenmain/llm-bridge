@@ -120,3 +120,12 @@ func TestMockProvider_SimulateMessageAfterStop(t *testing.T) {
 	// Should not panic
 	m.SimulateMessage(Message{Content: "test"})
 }
+
+func TestMockProvider_SendFileWithError(t *testing.T) {
+	m := NewMockProvider("test")
+	m.SetSendError(context.DeadlineExceeded)
+	err := m.SendFile("channel-1", "test.md", []byte("content"))
+	if err != context.DeadlineExceeded {
+		t.Errorf("SendFile() error = %v, want DeadlineExceeded", err)
+	}
+}

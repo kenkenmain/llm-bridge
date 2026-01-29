@@ -17,6 +17,7 @@ type mockLLM struct {
 	running      bool
 	lastActivity time.Time
 	sentMsgs     []llm.Message
+	output       io.Reader
 
 	sendErr   error
 	cancelErr error
@@ -57,7 +58,17 @@ func (m *mockLLM) Send(msg llm.Message) error {
 	return nil
 }
 
-func (m *mockLLM) Output() io.Reader { return nil }
+func (m *mockLLM) Output() io.Reader {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.output
+}
+
+func (m *mockLLM) SetOutput(r io.Reader) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.output = r
+}
 
 func (m *mockLLM) Running() bool {
 	m.mu.Lock()

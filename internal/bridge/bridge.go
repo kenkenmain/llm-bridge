@@ -18,11 +18,19 @@ import (
 // LLMFactory creates LLM instances. Defaults to llm.New.
 type LLMFactory func(backend, workingDir, claudePath string, resume bool) (llm.LLM, error)
 
+// DiscordFactory creates Discord provider instances. Defaults to provider.NewDiscord.
+type DiscordFactory func(token string, channelIDs []string) provider.Provider
+
+// TerminalFactory creates Terminal provider instances. Defaults to provider.NewTerminal.
+type TerminalFactory func(channelID string) *provider.Terminal
+
 type Bridge struct {
-	cfg        *config.Config
-	providers  map[string]provider.Provider
-	repos      map[string]*repoSession
-	output     *output.Handler
+	cfg             *config.Config
+	providers       map[string]provider.Provider
+	repos           map[string]*repoSession
+	output          *output.Handler
+	discordFactory  DiscordFactory
+	terminalFactory TerminalFactory
 	llmFactory LLMFactory
 
 	mu               sync.Mutex
@@ -44,11 +52,15 @@ type channelRef struct {
 
 func New(cfg *config.Config) *Bridge {
 	return &Bridge{
-		cfg:        cfg,
-		providers:  make(map[string]provider.Provider),
-		repos:      make(map[string]*repoSession),
-		output:     output.NewHandler(cfg.Defaults.OutputThreshold),
+		cfg:       cfg,
+		providers: make(map[string]provider.Provider),
+		repos:     make(map[string]*repoSession),
+		output:    output.NewHandler(cfg.Defaults.OutputThreshold),
 		llmFactory: llm.New,
+		discordFactory: func(token string, channelIDs []string) provider.Provider {
+			return provider.NewDiscord(token, channelIDs)
+		},
+		terminalFactory: provider.NewTerminal,
 	}
 }
 
@@ -57,7 +69,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	if b.cfg.Providers.Discord.BotToken != "" {
 		channelIDs := b.channelIDsForProvider("discord")
 		if len(channelIDs) > 0 {
-			discord := provider.NewDiscord(b.cfg.Providers.Discord.BotToken, channelIDs)
+			discord := b.discordFactory(b.cfg.Providers.Discord.BotToken, channelIDs)
 			if err := discord.Start(ctx); err != nil {
 				return fmt.Errorf("start discord: %w", err)
 			}
@@ -68,7 +80,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	}
 
 	// Initialize Terminal (always enabled for local interaction)
-	terminal := provider.NewTerminal("terminal")
+	terminal := b.terminalFactory("terminal")
 	if err := terminal.Start(ctx); err != nil {
 		return fmt.Errorf("start terminal: %w", err)
 	}

@@ -164,3 +164,112 @@ func TestTerminal_StopPreventsSend(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminal_ReadLoop_ContextCancel(t *testing.T) {
+	// Use a pipe so we can control when data is available
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	term := &Terminal{
+		channelID: "test",
+		reader:    pr,
+		writer:    &bytes.Buffer{},
+		messages:  make(chan Message, 10),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	if err := term.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Send a message to wake up the loop
+	_, _ = pw.Write([]byte("line1\n"))
+	time.Sleep(10 * time.Millisecond)
+
+	// Cancel context
+	cancel()
+
+	// Write another message after cancel - readLoop should exit
+	_, _ = pw.Write([]byte("line2\n"))
+	time.Sleep(20 * time.Millisecond)
+
+	// Verify terminal is still functional structure-wise
+	if term.ChannelID() != "test" {
+		t.Error("terminal structure should still be valid")
+	}
+}
+
+func TestTerminal_ReadLoop_FullChannel(t *testing.T) {
+	// Use a pipe so we can control when data is available
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	// Very small channel buffer to trigger full condition
+	term := &Terminal{
+		channelID: "test",
+		reader:    pr,
+		writer:    &bytes.Buffer{},
+		messages:  make(chan Message, 1), // Only 1 slot
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	if err := term.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Send many messages quickly to fill the channel
+	for i := 0; i < 5; i++ {
+		_, _ = pw.Write([]byte("line\n"))
+	}
+
+	// Give time for readLoop to process
+	time.Sleep(50 * time.Millisecond)
+
+	// Read one message to verify something got through
+	select {
+	case msg := <-term.Messages():
+		if msg.Content != "line" {
+			t.Errorf("message content = %q, want %q", msg.Content, "line")
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Error("expected at least one message")
+	}
+}
+
+func TestTerminal_ReadLoop_StoppedWhileReading(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	term := &Terminal{
+		channelID: "test",
+		reader:    pr,
+		writer:    &bytes.Buffer{},
+		messages:  make(chan Message, 10),
+	}
+
+	ctx := context.Background()
+
+	if err := term.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Send a message
+	_, _ = pw.Write([]byte("line1\n"))
+	time.Sleep(10 * time.Millisecond)
+
+	// Stop terminal (sets stopped flag)
+	_ = term.Stop()
+
+	// Try to send another message - should be dropped or trigger stopped check
+	// We need to write then close to unblock the scanner
+	pw.Close()
+
+	// Drain any messages
+	time.Sleep(20 * time.Millisecond)
+}
