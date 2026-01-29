@@ -80,7 +80,7 @@ var addRepoCmd = &cobra.Command{
 			return fmt.Errorf("marshal config: %w", err)
 		}
 
-		if err := os.WriteFile(cfgFile, data, 0644); err != nil {
+		if err := os.WriteFile(cfgFile, data, 0600); err != nil {
 			return fmt.Errorf("write config: %w", err)
 		}
 
@@ -99,8 +99,8 @@ func init() {
 	addRepoCmd.Flags().String("channel", "", "Channel ID")
 	addRepoCmd.Flags().String("llm", "claude", "LLM backend (claude, codex)")
 	addRepoCmd.Flags().String("dir", ".", "Working directory")
-	addRepoCmd.MarkFlagRequired("channel")
-	addRepoCmd.MarkFlagRequired("dir")
+	_ = addRepoCmd.MarkFlagRequired("channel")
+	_ = addRepoCmd.MarkFlagRequired("dir")
 }
 
 func main() {

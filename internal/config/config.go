@@ -53,15 +53,10 @@ func (d Defaults) GetIdleTimeoutDuration() time.Duration {
 }
 
 type ProviderConfigs struct {
-	Discord  DiscordConfig  `yaml:"discord"`
-	Telegram TelegramConfig `yaml:"telegram"`
+	Discord DiscordConfig `yaml:"discord"`
 }
 
 type DiscordConfig struct {
-	BotToken string `yaml:"bot_token"`
-}
-
-type TelegramConfig struct {
 	BotToken string `yaml:"bot_token"`
 }
 

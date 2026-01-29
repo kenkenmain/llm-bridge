@@ -47,20 +47,25 @@ func (t *Terminal) readLoop(ctx context.Context) {
 		default:
 		}
 
-		t.mu.Lock()
-		stopped := t.stopped
-		t.mu.Unlock()
-
-		if stopped {
-			return
-		}
-
-		t.messages <- Message{
+		msg := Message{
 			ChannelID: t.channelID,
 			Content:   scanner.Text(),
 			Author:    "terminal",
 			Source:    "terminal",
 		}
+
+		t.mu.Lock()
+		if t.stopped {
+			t.mu.Unlock()
+			return
+		}
+
+		select {
+		case t.messages <- msg:
+		default:
+			// Channel full or closed, drop message
+		}
+		t.mu.Unlock()
 	}
 }
 

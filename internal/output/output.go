@@ -25,10 +25,3 @@ func (h *Handler) FormatFile(content string) (filename string, data []byte) {
 	data = []byte(content)
 	return
 }
-
-func (h *Handler) Truncate(content string, maxLen int) string {
-	if len(content) <= maxLen {
-		return content
-	}
-	return content[:maxLen-3] + "..."
-}

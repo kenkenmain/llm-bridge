@@ -49,5 +49,5 @@ func (c *Codex) LastActivity() time.Time {
 }
 
 func (c *Codex) UpdateActivity() {
-	// No-op for stub
+	// No-op for stub - method must exist to satisfy LLM interface
 }

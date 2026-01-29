@@ -23,6 +23,7 @@ type Claude struct {
 	ptmx         *os.File
 	running      bool
 	lastActivity time.Time
+	closeOnce    *sync.Once // Pointer to allow per-process allocation
 }
 
 type ClaudeOption func(*Claude)
@@ -89,11 +90,26 @@ func (c *Claude) Start(ctx context.Context) error {
 
 	c.running = true
 	c.lastActivity = time.Now()
+	c.closeOnce = &sync.Once{} // New sync.Once for this process
+
+	// Capture per-process values to avoid race between old/new process goroutines
+	currentPtmx := c.ptmx
+	currentOnce := c.closeOnce
+	currentCmd := c.cmd
 
 	go func() {
-		c.cmd.Wait()
+		_ = currentCmd.Wait()
 		c.mu.Lock()
-		c.running = false
+		// Only update running if this is still the current process
+		if c.cmd == currentCmd {
+			c.running = false
+		}
+		// Close the captured PTY using its own sync.Once
+		currentOnce.Do(func() {
+			if currentPtmx != nil {
+				currentPtmx.Close()
+			}
+		})
 		c.mu.Unlock()
 	}()
 
@@ -109,11 +125,17 @@ func (c *Claude) Stop() error {
 	}
 
 	if err := c.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		c.cmd.Process.Kill()
+		_ = c.cmd.Process.Kill()
 	}
 
-	if c.ptmx != nil {
-		c.ptmx.Close()
+	// Close ptmx using sync.Once to prevent double-close
+	if c.closeOnce != nil {
+		c.closeOnce.Do(func() {
+			if c.ptmx != nil {
+				c.ptmx.Close()
+				c.ptmx = nil
+			}
+		})
 	}
 
 	c.running = false

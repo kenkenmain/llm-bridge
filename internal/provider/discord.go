@@ -77,19 +77,24 @@ func (d *Discord) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate
 		return
 	}
 
-	d.mu.Lock()
-	stopped := d.stopped
-	d.mu.Unlock()
-
-	if stopped {
-		return
-	}
-
-	d.messages <- Message{
+	msg := Message{
 		ChannelID: m.ChannelID,
 		Content:   m.Content,
 		Author:    m.Author.Username,
 		Source:    "discord",
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.stopped {
+		return
+	}
+
+	select {
+	case d.messages <- msg:
+	default:
+		// Channel full or closed, drop message
 	}
 }
 

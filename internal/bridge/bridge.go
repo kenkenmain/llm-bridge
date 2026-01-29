@@ -15,11 +15,23 @@ import (
 	"github.com/anthropics/llm-bridge/internal/router"
 )
 
+// LLMFactory creates LLM instances. Defaults to llm.New.
+type LLMFactory func(backend, workingDir, claudePath string, resume bool) (llm.LLM, error)
+
+// DiscordFactory creates Discord provider instances. Defaults to provider.NewDiscord.
+type DiscordFactory func(token string, channelIDs []string) provider.Provider
+
+// TerminalFactory creates Terminal provider instances. Defaults to provider.NewTerminal.
+type TerminalFactory func(channelID string) *provider.Terminal
+
 type Bridge struct {
-	cfg       *config.Config
-	providers map[string]provider.Provider
-	repos     map[string]*repoSession
-	output    *output.Handler
+	cfg             *config.Config
+	providers       map[string]provider.Provider
+	repos           map[string]*repoSession
+	output          *output.Handler
+	discordFactory  DiscordFactory
+	terminalFactory TerminalFactory
+	llmFactory LLMFactory
 
 	mu               sync.Mutex
 	terminalRepoName string
@@ -44,6 +56,11 @@ func New(cfg *config.Config) *Bridge {
 		providers: make(map[string]provider.Provider),
 		repos:     make(map[string]*repoSession),
 		output:    output.NewHandler(cfg.Defaults.OutputThreshold),
+		llmFactory: llm.New,
+		discordFactory: func(token string, channelIDs []string) provider.Provider {
+			return provider.NewDiscord(token, channelIDs)
+		},
+		terminalFactory: provider.NewTerminal,
 	}
 }
 
@@ -52,7 +69,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	if b.cfg.Providers.Discord.BotToken != "" {
 		channelIDs := b.channelIDsForProvider("discord")
 		if len(channelIDs) > 0 {
-			discord := provider.NewDiscord(b.cfg.Providers.Discord.BotToken, channelIDs)
+			discord := b.discordFactory(b.cfg.Providers.Discord.BotToken, channelIDs)
 			if err := discord.Start(ctx); err != nil {
 				return fmt.Errorf("start discord: %w", err)
 			}
@@ -62,22 +79,8 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}
 	}
 
-	// Initialize Telegram if configured
-	if b.cfg.Providers.Telegram.BotToken != "" {
-		channelIDs := b.channelIDsForProvider("telegram")
-		if len(channelIDs) > 0 {
-			telegram := provider.NewTelegram(b.cfg.Providers.Telegram.BotToken, channelIDs)
-			if err := telegram.Start(ctx); err != nil {
-				return fmt.Errorf("start telegram: %w", err)
-			}
-			b.providers["telegram"] = telegram
-			go b.handleMessages(ctx, telegram)
-			slog.Info("telegram provider started", "channels", len(channelIDs))
-		}
-	}
-
 	// Initialize Terminal (always enabled for local interaction)
-	terminal := provider.NewTerminal("terminal")
+	terminal := b.terminalFactory("terminal")
 	if err := terminal.Start(ctx); err != nil {
 		return fmt.Errorf("start terminal: %w", err)
 	}
@@ -98,7 +101,7 @@ func (b *Bridge) Stop() error {
 
 	for _, repo := range b.repos {
 		if repo.llm != nil {
-			repo.llm.Stop()
+			_ = repo.llm.Stop()
 		}
 		if repo.cancelCtx != nil {
 			repo.cancelCtx()
@@ -106,7 +109,7 @@ func (b *Bridge) Stop() error {
 	}
 
 	for _, prov := range b.providers {
-		prov.Stop()
+		_ = prov.Stop()
 	}
 
 	return nil
@@ -163,13 +166,13 @@ func (b *Bridge) handleBridgeCommand(prov provider.Provider, channelID string, r
 		response = fmt.Sprintf("Unknown command: %s", route.Command)
 	}
 
-	prov.Send(channelID, response)
+	_ = prov.Send(channelID, response)
 }
 
 func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, msg provider.Message, route router.Route) {
 	repoName := b.repoForChannel(msg.ChannelID)
 	if repoName == "" {
-		prov.Send(msg.ChannelID, "No repo configured for this channel")
+		_ = prov.Send(msg.ChannelID, "No repo configured for this channel")
 		return
 	}
 
@@ -177,7 +180,7 @@ func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, m
 	session, err := b.getOrCreateSession(ctx, repoName, repo, prov)
 	if err != nil {
 		slog.Error("failed to create session", "error", err, "repo", repoName)
-		prov.Send(msg.ChannelID, fmt.Sprintf("Error starting LLM: %v", err))
+		_ = prov.Send(msg.ChannelID, fmt.Sprintf("Error starting LLM: %v", err))
 		return
 	}
 
@@ -190,7 +193,7 @@ func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, m
 
 	if err := session.llm.Send(llmMsg); err != nil {
 		slog.Error("send to llm failed", "error", err, "repo", repoName)
-		prov.Send(msg.ChannelID, fmt.Sprintf("Error: %v", err))
+		_ = prov.Send(msg.ChannelID, fmt.Sprintf("Error: %v", err))
 	}
 }
 
@@ -208,7 +211,7 @@ func (b *Bridge) getOrCreateSession(ctx context.Context, repoName string, repo c
 		llmBackend = b.cfg.Defaults.LLM
 	}
 
-	llmInstance, err := llm.New(llmBackend, repo.WorkingDir, b.cfg.Defaults.GetClaudePath(), b.cfg.Defaults.GetResumeSession())
+	llmInstance, err := b.llmFactory(llmBackend, repo.WorkingDir, b.cfg.Defaults.GetClaudePath(), b.cfg.Defaults.GetResumeSession())
 	if err != nil {
 		return nil, fmt.Errorf("create llm: %w", err)
 	}
@@ -256,12 +259,13 @@ func (b *Bridge) readOutput(session *repoSession, repoName string) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Use goroutine for non-blocking reads
+	// Use goroutine for non-blocking reads with buffered channel
+	// to prevent PTY backpressure when broadcast is slow
 	type readResult struct {
 		line string
 		err  error
 	}
-	lines := make(chan readResult)
+	lines := make(chan readResult, 100) // Buffer to prevent blocking on slow broadcasts
 	go func() {
 		defer close(lines)
 		for {
@@ -356,23 +360,23 @@ func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Term
 			for name := range b.cfg.Repos {
 				repos = append(repos, name)
 			}
-			term.Send("", fmt.Sprintf("Usage: /select <repo-name>\nAvailable repos: %v\nCurrently selected: %s", repos, b.getTerminalRepo()))
+			_ = term.Send("", fmt.Sprintf("Usage: /select <repo-name>\nAvailable repos: %v\nCurrently selected: %s", repos, b.getTerminalRepo()))
 			return
 		}
 		if _, ok := b.cfg.Repos[route.Args]; !ok {
-			term.Send("", fmt.Sprintf("Unknown repo: %s", route.Args))
+			_ = term.Send("", fmt.Sprintf("Unknown repo: %s", route.Args))
 			return
 		}
 		b.mu.Lock()
 		b.terminalRepoName = route.Args
 		b.mu.Unlock()
-		term.Send("", fmt.Sprintf("Selected repo: %s", route.Args))
+		_ = term.Send("", fmt.Sprintf("Selected repo: %s", route.Args))
 		return
 	}
 
 	repoName := b.getTerminalRepo()
 	if repoName == "" {
-		term.Send("", "No repos configured. Add repos to llm-bridge.yaml")
+		_ = term.Send("", "No repos configured. Add repos to llm-bridge.yaml")
 		return
 	}
 
@@ -385,7 +389,7 @@ func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Term
 		session, err := b.getOrCreateSession(ctx, repoName, repo, term)
 		if err != nil {
 			slog.Error("failed to create session", "error", err, "repo", repoName)
-			term.Send("", fmt.Sprintf("Error starting LLM: %v", err))
+			_ = term.Send("", fmt.Sprintf("Error starting LLM: %v", err))
 			return
 		}
 
@@ -397,7 +401,7 @@ func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Term
 
 		if err := session.llm.Send(llmMsg); err != nil {
 			slog.Error("send to llm failed", "error", err, "repo", repoName)
-			term.Send("", fmt.Sprintf("Error: %v", err))
+			_ = term.Send("", fmt.Sprintf("Error: %v", err))
 		}
 	}
 }
@@ -434,25 +438,41 @@ func (b *Bridge) idleTimeoutLoop(ctx context.Context) {
 }
 
 func (b *Bridge) checkIdleTimeouts(timeout time.Duration) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	// Collect sessions to stop under lock, then release lock before stopping
+	// to avoid blocking message handling and session creation
+	type idleSession struct {
+		name     string
+		session  *repoSession
+		channels []channelRef
+	}
+	var toStop []idleSession
 
+	b.mu.Lock()
 	for name, session := range b.repos {
 		if session.llm == nil || !session.llm.Running() {
 			continue
 		}
 
 		if time.Since(session.llm.LastActivity()) > timeout {
-			slog.Info("stopping idle llm", "repo", name, "idle", time.Since(session.llm.LastActivity()))
-			session.llm.Stop()
-			if session.cancelCtx != nil {
-				session.cancelCtx()
-			}
+			// Copy channels slice while holding lock
+			channels := make([]channelRef, len(session.channels))
+			copy(channels, session.channels)
+			toStop = append(toStop, idleSession{name, session, channels})
 			delete(b.repos, name)
+		}
+	}
+	b.mu.Unlock()
 
-			for _, ch := range session.channels {
-				ch.provider.Send(ch.channelID, fmt.Sprintf("LLM stopped due to idle timeout (%v)", timeout))
-			}
+	// Stop sessions and notify channels outside the lock
+	for _, idle := range toStop {
+		slog.Info("stopping idle llm", "repo", idle.name, "idle", time.Since(idle.session.llm.LastActivity()))
+		_ = idle.session.llm.Stop()
+		if idle.session.cancelCtx != nil {
+			idle.session.cancelCtx()
+		}
+
+		for _, ch := range idle.channels {
+			_ = ch.provider.Send(ch.channelID, fmt.Sprintf("LLM stopped due to idle timeout (%v)", timeout))
 		}
 	}
 }
@@ -513,7 +533,7 @@ func (b *Bridge) restartLLM(channelID string) string {
 	b.mu.Lock()
 	session, ok := b.repos[repoName]
 	if ok && session.llm != nil {
-		session.llm.Stop()
+		_ = session.llm.Stop()
 		if session.cancelCtx != nil {
 			session.cancelCtx()
 		}
