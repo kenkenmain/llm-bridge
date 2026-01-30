@@ -2,7 +2,8 @@ package ratelimit
 
 import (
 	"sync"
-	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // Config holds rate limit settings.
@@ -12,22 +13,18 @@ type Config struct {
 }
 
 // Limiter tracks per-key rate limits using token buckets.
+// It wraps golang.org/x/time/rate.Limiter with per-key tracking.
 type Limiter struct {
-	cfg     Config
-	mu      sync.Mutex
-	buckets map[string]*bucket
-}
-
-type bucket struct {
-	tokens    float64
-	lastCheck time.Time
+	cfg      Config
+	mu       sync.Mutex
+	limiters map[string]*rate.Limiter
 }
 
 // NewLimiter creates a Limiter with the given config.
 func NewLimiter(cfg Config) *Limiter {
 	return &Limiter{
-		cfg:     cfg,
-		buckets: make(map[string]*bucket),
+		cfg:      cfg,
+		limiters: make(map[string]*rate.Limiter),
 	}
 }
 
@@ -35,38 +32,19 @@ func NewLimiter(cfg Config) *Limiter {
 // Returns true if allowed, false if rate-limited.
 func (l *Limiter) Allow(key string) bool {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	now := time.Now()
-	b, ok := l.buckets[key]
+	limiter, ok := l.limiters[key]
 	if !ok {
-		b = &bucket{
-			tokens:    float64(l.cfg.Burst),
-			lastCheck: now,
-		}
-		l.buckets[key] = b
+		limiter = rate.NewLimiter(rate.Limit(l.cfg.Rate), l.cfg.Burst)
+		l.limiters[key] = limiter
 	}
+	l.mu.Unlock()
 
-	// Refill tokens based on elapsed time
-	elapsed := now.Sub(b.lastCheck).Seconds()
-	b.tokens += elapsed * l.cfg.Rate
-	if b.tokens > float64(l.cfg.Burst) {
-		b.tokens = float64(l.cfg.Burst)
-	}
-	b.lastCheck = now
-
-	// Check if a token is available
-	if b.tokens >= 1 {
-		b.tokens--
-		return true
-	}
-
-	return false
+	return limiter.Allow()
 }
 
 // Reset removes all tracked keys.
 func (l *Limiter) Reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.buckets = make(map[string]*bucket)
+	l.limiters = make(map[string]*rate.Limiter)
 }
