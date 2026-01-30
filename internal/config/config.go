@@ -23,11 +23,66 @@ type RepoConfig struct {
 }
 
 type Defaults struct {
-	LLM             string `yaml:"llm"`
-	ClaudePath      string `yaml:"claude_path"`
-	OutputThreshold int    `yaml:"output_threshold"`
-	IdleTimeout     string `yaml:"idle_timeout"`
-	ResumeSession   *bool  `yaml:"resume_session"`
+	LLM             string          `yaml:"llm"`
+	ClaudePath      string          `yaml:"claude_path"`
+	OutputThreshold int             `yaml:"output_threshold"`
+	IdleTimeout     string          `yaml:"idle_timeout"`
+	ResumeSession   *bool           `yaml:"resume_session"`
+	RateLimit       RateLimitConfig `yaml:"rate_limit"`
+}
+
+// RateLimitConfig holds per-user and per-channel rate limit settings.
+type RateLimitConfig struct {
+	UserRate     float64 `yaml:"user_rate"`     // messages per second per user (default: 0.5 = 1 msg every 2s)
+	UserBurst    int     `yaml:"user_burst"`    // burst capacity per user (default: 3)
+	ChannelRate  float64 `yaml:"channel_rate"`  // messages per second per channel (default: 2.0)
+	ChannelBurst int     `yaml:"channel_burst"` // burst capacity per channel (default: 10)
+	Enabled      *bool   `yaml:"enabled"`       // enable/disable rate limiting (default: true)
+}
+
+// GetRateLimitEnabled returns whether rate limiting is enabled.
+// Defaults to true if not explicitly set.
+func (r RateLimitConfig) GetRateLimitEnabled() bool {
+	if r.Enabled == nil {
+		return true
+	}
+	return *r.Enabled
+}
+
+// GetUserRate returns the user rate limit in messages per second.
+// Defaults to 0.5 (1 message every 2 seconds).
+func (r RateLimitConfig) GetUserRate() float64 {
+	if r.UserRate == 0 {
+		return 0.5
+	}
+	return r.UserRate
+}
+
+// GetUserBurst returns the user burst capacity.
+// Defaults to 3.
+func (r RateLimitConfig) GetUserBurst() int {
+	if r.UserBurst == 0 {
+		return 3
+	}
+	return r.UserBurst
+}
+
+// GetChannelRate returns the channel rate limit in messages per second.
+// Defaults to 2.0.
+func (r RateLimitConfig) GetChannelRate() float64 {
+	if r.ChannelRate == 0 {
+		return 2.0
+	}
+	return r.ChannelRate
+}
+
+// GetChannelBurst returns the channel burst capacity.
+// Defaults to 10.
+func (r RateLimitConfig) GetChannelBurst() int {
+	if r.ChannelBurst == 0 {
+		return 10
+	}
+	return r.ChannelBurst
 }
 
 func (d Defaults) GetClaudePath() string {

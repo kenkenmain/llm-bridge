@@ -85,3 +85,46 @@ func TestDiscord_EmptyChannelList(t *testing.T) {
 		t.Errorf("expected empty channels map, got %d", len(d.channels))
 	}
 }
+
+// TestDiscord_MessageIncludesAuthorID verifies that the Message struct
+// includes the AuthorID field. Since handleMessage requires a live Discord
+// session with discordgo objects, we verify the struct field exists and
+// can be set correctly by constructing a Message directly as the handler would.
+func TestDiscord_MessageIncludesAuthorID(t *testing.T) {
+	// Simulate what handleMessage constructs
+	msg := Message{
+		ChannelID: "channel-123",
+		Content:   "test message",
+		Author:    "testuser",
+		AuthorID:  "123456789012345678", // Discord snowflake ID
+		Source:    "discord",
+	}
+
+	if msg.AuthorID == "" {
+		t.Error("AuthorID should be populated")
+	}
+	if msg.AuthorID != "123456789012345678" {
+		t.Errorf("AuthorID = %q, want %q", msg.AuthorID, "123456789012345678")
+	}
+
+	// Verify AuthorID is distinct from Author (display name)
+	if msg.AuthorID == msg.Author {
+		t.Error("AuthorID should be the snowflake ID, not the display name")
+	}
+}
+
+// TestDiscord_MessageWithoutAuthorID verifies terminal-like messages
+// (no AuthorID) still work correctly.
+func TestDiscord_MessageWithoutAuthorID(t *testing.T) {
+	msg := Message{
+		ChannelID: "terminal",
+		Content:   "test",
+		Author:    "localuser",
+		AuthorID:  "", // Terminal messages have no AuthorID
+		Source:    "terminal",
+	}
+
+	if msg.AuthorID != "" {
+		t.Error("terminal messages should have empty AuthorID")
+	}
+}

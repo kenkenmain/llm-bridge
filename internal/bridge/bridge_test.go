@@ -1354,3 +1354,361 @@ func TestBridge_ReadOutput_BufferFlush(t *testing.T) {
 		t.Error("readOutput should return when pipe is closed")
 	}
 }
+
+// Rate limiting integration tests
+
+func TestBridge_New_InitializesLimiters(t *testing.T) {
+	cfg := testConfig()
+	// Default config has rate limiting enabled (nil Enabled defaults to true)
+	b := New(cfg)
+
+	if b.userLimiter == nil {
+		t.Error("userLimiter should be initialized when rate limiting is enabled")
+	}
+	if b.channelLimiter == nil {
+		t.Error("channelLimiter should be initialized when rate limiting is enabled")
+	}
+}
+
+func TestBridge_New_LimitersNilWhenDisabled(t *testing.T) {
+	cfg := testConfig()
+	disabled := false
+	cfg.Defaults.RateLimit.Enabled = &disabled
+	b := New(cfg)
+
+	if b.userLimiter != nil {
+		t.Error("userLimiter should be nil when rate limiting is disabled")
+	}
+	if b.channelLimiter != nil {
+		t.Error("channelLimiter should be nil when rate limiting is disabled")
+	}
+}
+
+func TestBridge_RateLimitedUser(t *testing.T) {
+	cfg := testConfig()
+	cfg.Defaults.RateLimit = config.RateLimitConfig{
+		UserRate:     0.1,  // very slow refill
+		UserBurst:    1,    // only 1 allowed
+		ChannelRate:  100,  // high channel limit so it doesn't interfere
+		ChannelBurst: 100,
+	}
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	mockProv := provider.NewMockProvider("discord")
+
+	b.repos["test-repo"] = &repoSession{
+		name:     "test-repo",
+		llm:      mockLLM,
+		channels: []channelRef{{provider: mockProv, channelID: "channel-123"}},
+		merger:   NewMerger(2 * time.Second),
+	}
+
+	ctx := context.Background()
+
+	// First message should pass (uses AuthorID for rate limiting)
+	msg1 := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "hello",
+		Author:    "testuser",
+		AuthorID:  "user-snowflake-123",
+		Source:    "discord",
+	}
+	b.processMessage(ctx, mockProv, msg1)
+
+	sentMsgs := mockLLM.getSentMessages()
+	if len(sentMsgs) != 1 {
+		t.Fatalf("first message should pass, got %d LLM messages", len(sentMsgs))
+	}
+
+	// Second message from same AuthorID should be rate limited
+	msg2 := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "world",
+		Author:    "testuser",
+		AuthorID:  "user-snowflake-123",
+		Source:    "discord",
+	}
+	b.processMessage(ctx, mockProv, msg2)
+
+	sentMsgs = mockLLM.getSentMessages()
+	if len(sentMsgs) != 1 {
+		t.Fatalf("second message should be rate limited, got %d LLM messages", len(sentMsgs))
+	}
+
+	// Check rejection message was sent
+	provMsgs := mockProv.GetSentMessages()
+	found := false
+	for _, m := range provMsgs {
+		if strings.Contains(m.Content, "Rate limited") && strings.Contains(m.Content, "testuser") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected rate limit rejection message mentioning user")
+	}
+}
+
+func TestBridge_RateLimitedChannel(t *testing.T) {
+	cfg := testConfig()
+	cfg.Defaults.RateLimit = config.RateLimitConfig{
+		UserRate:     100, // high user limit so it doesn't interfere
+		UserBurst:    100,
+		ChannelRate:  0.1, // very slow refill
+		ChannelBurst: 1,   // only 1 allowed per channel
+	}
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	mockProv := provider.NewMockProvider("discord")
+
+	b.repos["test-repo"] = &repoSession{
+		name:     "test-repo",
+		llm:      mockLLM,
+		channels: []channelRef{{provider: mockProv, channelID: "channel-123"}},
+		merger:   NewMerger(2 * time.Second),
+	}
+
+	ctx := context.Background()
+
+	// First message should pass
+	msg1 := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "hello",
+		Author:    "user1",
+		AuthorID:  "id-1",
+		Source:    "discord",
+	}
+	b.processMessage(ctx, mockProv, msg1)
+
+	// Second message from different user on same channel should be rate limited
+	msg2 := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "hi",
+		Author:    "user2",
+		AuthorID:  "id-2",
+		Source:    "discord",
+	}
+	b.processMessage(ctx, mockProv, msg2)
+
+	sentMsgs := mockLLM.getSentMessages()
+	if len(sentMsgs) != 1 {
+		t.Fatalf("expected only 1 LLM message (second should be channel-limited), got %d", len(sentMsgs))
+	}
+
+	// Check channel rejection message
+	provMsgs := mockProv.GetSentMessages()
+	found := false
+	for _, m := range provMsgs {
+		if strings.Contains(m.Content, "too many messages in this channel") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected channel rate limit rejection message")
+	}
+}
+
+func TestBridge_RateLimitBypassBridgeCommands(t *testing.T) {
+	cfg := testConfig()
+	cfg.Defaults.RateLimit = config.RateLimitConfig{
+		UserRate:     0.001, // extremely slow
+		UserBurst:    0,     // zero burst - would block everything
+		ChannelRate:  0.001,
+		ChannelBurst: 0,
+	}
+	b := New(cfg)
+
+	mockProv := provider.NewMockProvider("discord")
+	ctx := context.Background()
+
+	// Bridge commands should bypass rate limiting entirely
+	for i := 0; i < 5; i++ {
+		msg := provider.Message{
+			ChannelID: "channel-123",
+			Content:   "/help",
+			Author:    "testuser",
+			AuthorID:  "user-123",
+			Source:    "discord",
+		}
+		b.processMessage(ctx, mockProv, msg)
+	}
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 5 {
+		t.Errorf("all 5 bridge commands should bypass rate limiting, got %d responses", len(msgs))
+	}
+
+	// Verify they are help responses, not rate limit messages
+	for _, m := range msgs {
+		if strings.Contains(m.Content, "Rate limited") {
+			t.Error("bridge commands should never receive rate limit messages")
+		}
+	}
+}
+
+func TestBridge_RateLimitDisabled(t *testing.T) {
+	cfg := testConfig()
+	disabled := false
+	cfg.Defaults.RateLimit = config.RateLimitConfig{
+		Enabled:      &disabled,
+		UserRate:     0.001,
+		UserBurst:    0,
+		ChannelRate:  0.001,
+		ChannelBurst: 0,
+	}
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	mockProv := provider.NewMockProvider("discord")
+
+	b.repos["test-repo"] = &repoSession{
+		name:     "test-repo",
+		llm:      mockLLM,
+		channels: []channelRef{{provider: mockProv, channelID: "channel-123"}},
+		merger:   NewMerger(2 * time.Second),
+	}
+
+	ctx := context.Background()
+
+	// Send multiple messages - none should be rate limited
+	for i := 0; i < 5; i++ {
+		msg := provider.Message{
+			ChannelID: "channel-123",
+			Content:   fmt.Sprintf("message %d", i),
+			Author:    "testuser",
+			AuthorID:  "user-123",
+			Source:    "discord",
+		}
+		b.processMessage(ctx, mockProv, msg)
+	}
+
+	sentMsgs := mockLLM.getSentMessages()
+	if len(sentMsgs) != 5 {
+		t.Errorf("with rate limiting disabled, all 5 messages should pass, got %d", len(sentMsgs))
+	}
+
+	// No rate limit messages should have been sent
+	provMsgs := mockProv.GetSentMessages()
+	for _, m := range provMsgs {
+		if strings.Contains(m.Content, "Rate limited") {
+			t.Error("no rate limit messages should be sent when disabled")
+		}
+	}
+}
+
+func TestBridge_RateLimitTerminalBypass(t *testing.T) {
+	cfg := testConfig()
+	cfg.Defaults.RateLimit = config.RateLimitConfig{
+		UserRate:     0.001, // extremely slow
+		UserBurst:    0,     // zero burst - would block everything
+		ChannelRate:  100,   // high channel rate
+		ChannelBurst: 100,
+	}
+	b := New(cfg)
+
+	mockProv := provider.NewMockProvider("discord")
+
+	// Terminal messages have empty AuthorID, so user rate limiting is skipped
+	msg := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "hello",
+		Author:    "terminal-user",
+		AuthorID:  "", // empty = terminal
+		Source:    "terminal",
+	}
+
+	// isRateLimited should return false for terminal (no AuthorID)
+	result := b.isRateLimited(mockProv, msg)
+	if result {
+		t.Error("terminal messages (empty AuthorID) should not be user-rate-limited")
+	}
+}
+
+func TestBridge_RateLimitDifferentUsersIndependent(t *testing.T) {
+	cfg := testConfig()
+	cfg.Defaults.RateLimit = config.RateLimitConfig{
+		UserRate:     0.1, // very slow refill
+		UserBurst:    1,   // only 1 allowed
+		ChannelRate:  100, // high channel limit
+		ChannelBurst: 100,
+	}
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	mockProv := provider.NewMockProvider("discord")
+
+	b.repos["test-repo"] = &repoSession{
+		name:     "test-repo",
+		llm:      mockLLM,
+		channels: []channelRef{{provider: mockProv, channelID: "channel-123"}},
+		merger:   NewMerger(2 * time.Second),
+	}
+
+	ctx := context.Background()
+
+	// User A sends a message - should pass
+	msgA := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "from user A",
+		Author:    "userA",
+		AuthorID:  "snowflake-A",
+		Source:    "discord",
+	}
+	b.processMessage(ctx, mockProv, msgA)
+
+	// User B sends a message - should also pass (independent bucket)
+	msgB := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "from user B",
+		Author:    "userB",
+		AuthorID:  "snowflake-B",
+		Source:    "discord",
+	}
+	b.processMessage(ctx, mockProv, msgB)
+
+	sentMsgs := mockLLM.getSentMessages()
+	if len(sentMsgs) != 2 {
+		t.Errorf("different users should have independent limits, got %d LLM messages (want 2)", len(sentMsgs))
+	}
+
+	// User A sends again - should be rate limited
+	msgA2 := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "from user A again",
+		Author:    "userA",
+		AuthorID:  "snowflake-A",
+		Source:    "discord",
+	}
+	b.processMessage(ctx, mockProv, msgA2)
+
+	sentMsgs = mockLLM.getSentMessages()
+	if len(sentMsgs) != 2 {
+		t.Errorf("user A second message should be rate limited, got %d LLM messages (want 2)", len(sentMsgs))
+	}
+}
+
+func TestBridge_IsRateLimited_NilLimiters(t *testing.T) {
+	cfg := testConfig()
+	disabled := false
+	cfg.Defaults.RateLimit.Enabled = &disabled
+	b := New(cfg)
+
+	mockProv := provider.NewMockProvider("discord")
+	msg := provider.Message{
+		ChannelID: "channel-123",
+		Content:   "test",
+		AuthorID:  "user-123",
+	}
+
+	// With nil limiters, should always return false
+	if b.isRateLimited(mockProv, msg) {
+		t.Error("nil limiters should not rate limit")
+	}
+}

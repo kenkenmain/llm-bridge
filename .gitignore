@@ -1,2 +1,5 @@
 /llm-bridge
 coverage.out
+cov.out
+.agents/
+docs/plans/
