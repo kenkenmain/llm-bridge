@@ -1,11 +1,18 @@
 # llm-bridge
 
-Go service bridging Discord/Terminal to Claude/Codex CLI.
+Go service bridging Discord/Terminal to Claude CLI.
 
 ## Development Environment
 
-Go is NOT installed locally. Use Docker for all Go commands:
-`docker run --rm -v /root/llm-bridge:/app -w /app golang:1.21 go <command>`
+This project supports two development modes:
+
+**Local Go (debugging and development):**
+- Run `go build`, `go test`, `make debug` directly when Go is installed locally.
+- Faster iteration for development and debugging.
+
+**Docker (CI and production):**
+- Run `make docker-test`, `make docker-lint`, `make docker-build` when Go is not installed.
+- Ensures consistent environment for CI and production builds.
 
 ## Dependencies
 
@@ -15,8 +22,14 @@ caching, validation) rather than reimplementing from scratch.
 
 ## Build
 
+**Local:**
 ```bash
 go build -o llm-bridge ./cmd/llm-bridge
+```
+
+**Docker:**
+```bash
+make docker-build
 ```
 
 ## Run
@@ -46,7 +59,7 @@ docker-compose up -d
 
 - `internal/bridge/` - Core bridge logic, input merging, output broadcasting
 - `internal/config/` - YAML config parsing
-- `internal/llm/` - LLM interface, Claude/Codex wrappers (PTY-based)
+- `internal/llm/` - LLM interface, Claude wrapper (PTY-based)
 - `internal/provider/` - Discord/Terminal providers
 - `internal/ratelimit/` - Per-user and per-channel rate limiting
 - `internal/router/` - Command routing (/, !)
@@ -58,7 +71,7 @@ docker-compose up -d
 - **Conflict prefixing** - `[Discord]` prefix when sources collide
 - **Output broadcast** - All output sent to ALL connected channels
 - **Idle timeout** - LLM process stops after idle period
-- **LLM selection** - Configure claude or codex per repo
+- **Claude CLI** - Claude as the LLM backend
 - **Terminal** - Local stdin/stdout always enabled
 - **Rate limiting** - Per-user and per-channel token-bucket rate limiting
 
@@ -66,7 +79,7 @@ docker-compose up -d
 
 - GitHub Actions on PRs with `ci` label
 - Coverage threshold: 90% (enforced)
-- `go test -v -race -coverprofile=coverage.out ./...`
+- Tests run inside Docker containers
 - Docker build verification
 
 ## Commands

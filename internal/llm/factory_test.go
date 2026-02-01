@@ -24,16 +24,6 @@ func TestNew_EmptyDefaultsToClaude(t *testing.T) {
 	}
 }
 
-func TestNew_Codex(t *testing.T) {
-	llm, err := New("codex", "/tmp/test", "", false)
-	if err != nil {
-		t.Fatalf("New(codex) error = %v", err)
-	}
-	if llm.Name() != "codex" {
-		t.Errorf("Name() = %q, want codex", llm.Name())
-	}
-}
-
 func TestNew_Unknown(t *testing.T) {
 	_, err := New("gpt4", "/tmp/test", "", false)
 	if err == nil {
