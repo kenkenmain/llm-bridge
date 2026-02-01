@@ -10,7 +10,7 @@ RUN apk add --no-cache \
     bash \
     git
 
-# Install Claude CLI
-RUN npm install -g @anthropic-ai/claude-code || true
+# llm-bridge spawns the Claude CLI as a child process at runtime.
+RUN npm install -g @anthropic-ai/claude-code
 
 RUN mkdir -p /etc/llm-bridge
