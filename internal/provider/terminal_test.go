@@ -127,8 +127,8 @@ func TestTerminal_Stop(t *testing.T) {
 func TestTerminal_StopPreventsSend(t *testing.T) {
 	// Use a pipe so we can control when data is available
 	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = pw.Close() }()
 
 	term := &Terminal{
 		channelID: "test",
@@ -168,8 +168,8 @@ func TestTerminal_StopPreventsSend(t *testing.T) {
 func TestTerminal_ReadLoop_ContextCancel(t *testing.T) {
 	// Use a pipe so we can control when data is available
 	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = pw.Close() }()
 
 	term := &Terminal{
 		channelID: "test",
@@ -204,8 +204,8 @@ func TestTerminal_ReadLoop_ContextCancel(t *testing.T) {
 func TestTerminal_ReadLoop_FullChannel(t *testing.T) {
 	// Use a pipe so we can control when data is available
 	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = pw.Close() }()
 
 	// Very small channel buffer to trigger full condition
 	term := &Terminal{
@@ -243,8 +243,8 @@ func TestTerminal_ReadLoop_FullChannel(t *testing.T) {
 
 func TestTerminal_ReadLoop_StoppedWhileReading(t *testing.T) {
 	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = pw.Close() }()
 
 	term := &Terminal{
 		channelID: "test",
@@ -268,7 +268,7 @@ func TestTerminal_ReadLoop_StoppedWhileReading(t *testing.T) {
 
 	// Try to send another message - should be dropped or trigger stopped check
 	// We need to write then close to unblock the scanner
-	pw.Close()
+	_ = pw.Close()
 
 	// Drain any messages
 	time.Sleep(20 * time.Millisecond)

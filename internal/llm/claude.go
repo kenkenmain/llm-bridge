@@ -107,7 +107,7 @@ func (c *Claude) Start(ctx context.Context) error {
 		// Close the captured PTY using its own sync.Once
 		currentOnce.Do(func() {
 			if currentPtmx != nil {
-				currentPtmx.Close()
+				_ = currentPtmx.Close()
 			}
 		})
 		c.mu.Unlock()
@@ -132,7 +132,7 @@ func (c *Claude) Stop() error {
 	if c.closeOnce != nil {
 		c.closeOnce.Do(func() {
 			if c.ptmx != nil {
-				c.ptmx.Close()
+				_ = c.ptmx.Close()
 				c.ptmx = nil
 			}
 		})

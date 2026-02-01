@@ -11,8 +11,6 @@ func New(backend, workingDir, claudePath string, resume bool) (LLM, error) {
 			WithResume(resume),
 			WithClaudePath(claudePath),
 		), nil
-	case "codex":
-		return NewCodex(workingDir), nil
 	default:
 		return nil, fmt.Errorf("unknown LLM backend: %s", backend)
 	}
