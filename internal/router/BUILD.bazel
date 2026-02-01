@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "router",
+    srcs = ["router.go"],
+    importpath = "github.com/anthropics/llm-bridge/internal/router",
+    visibility = ["//:__subpackages__"],
+)
+
+go_test(
+    name = "router_test",
+    srcs = ["router_test.go"],
+    embed = [":router"],
+)

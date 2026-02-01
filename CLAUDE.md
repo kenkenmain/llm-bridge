@@ -4,15 +4,8 @@ Go service bridging Discord/Terminal to Claude CLI.
 
 ## Development Environment
 
-This project supports two development modes:
-
-**Local Go (debugging and development):**
-- Run `go build`, `go test`, `make debug` directly when Go is installed locally.
-- Faster iteration for development and debugging.
-
-**Docker (CI and production):**
-- Run `make docker-test`, `make docker-lint`, `make docker-build` when Go is not installed.
-- Ensures consistent environment for CI and production builds.
+This project uses **Bazel 8.5.1** for hermetic builds, testing, and linting.
+Install [Bazelisk](https://github.com/bazelbuild/bazelisk) (auto-downloads the correct Bazel version).
 
 ## Dependencies
 
@@ -22,14 +15,27 @@ caching, validation) rather than reimplementing from scratch.
 
 ## Build
 
-**Local:**
 ```bash
-go build -o llm-bridge ./cmd/llm-bridge
+bazel build //cmd/llm-bridge   # build the binary
+bazel build //...               # build everything
 ```
 
-**Docker:**
+## Test
+
 ```bash
-make docker-build
+bazel test //...                # run all tests
+```
+
+## Lint
+
+```bash
+bazel test //:lint              # run golangci-lint
+```
+
+## Gazelle (regenerate BUILD files)
+
+```bash
+bazel run //:gazelle            # after changing imports or adding files
 ```
 
 ## Run
@@ -77,10 +83,9 @@ docker-compose up -d
 
 ## CI
 
-- GitHub Actions on PRs with `ci` label
-- Coverage threshold: 90% (enforced)
-- Tests run inside Docker containers
-- Docker build verification
+- GitHub Actions on PRs to `main` and pushes to `main` (automatic, no label required)
+- Bazel build, test, and lint
+- Docker image build verification
 
 ## Commands
 
@@ -90,6 +95,6 @@ docker-compose up -d
 | `/cancel`        | Bridge  | Send SIGINT to LLM            |
 | `/restart`       | Bridge  | Restart LLM process           |
 | `/select <repo>` | Bridge  | Select repo for terminal      |
-| `/help`          | Bridge  | Show available commands       |
+| `/help`          | Bridge  | Show available commands        |
 | `!commit`        | LLM     | Translates to `/commit`       |
 | text             | LLM     | Raw message to LLM            |

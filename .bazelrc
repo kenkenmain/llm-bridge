@@ -1,0 +1,16 @@
+# Hermetic builds: don't inherit host env
+build --incompatible_strict_action_env
+
+# Go race detector config
+build:race --@io_bazel_rules_go//go/config:race
+
+# Test output
+test --test_output=errors
+
+# Pass HOME to local tests (needed by lint for cache dirs and Go SDK discovery)
+test --test_env=HOME
+
+# CI config
+build:ci --repository_cache=~/.cache/bazel-repo
+build:ci --disk_cache=~/.cache/bazel-disk
+test:ci --test_output=all

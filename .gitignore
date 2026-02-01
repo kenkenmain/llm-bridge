@@ -3,3 +3,10 @@ coverage.out
 cov.out
 .agents/
 docs/plans/
+
+# Bazel
+bazel-bin
+bazel-out
+bazel-testlogs
+bazel-llm-bridge
+.build/

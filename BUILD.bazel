@@ -1,0 +1,51 @@
+load("@gazelle//:def.bzl", "gazelle")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+# ─── Gazelle ─────────────────────────────────────────────────────────────────
+# Run: bazel run //:gazelle
+gazelle(
+    name = "gazelle",
+    prefix = "github.com/anthropics/llm-bridge",
+)
+
+# ─── Lint ────────────────────────────────────────────────────────────────────
+sh_test(
+    name = "lint",
+    # Size "large" for network access (downloads golangci-lint on first run).
+    size = "large",
+    srcs = ["scripts/lint.sh"],
+    tags = [
+        "lint",
+        "local",
+        "no-sandbox",
+    ],
+)
+
+# ─── OCI image ───────────────────────────────────────────────────────────────
+# Package the Go binary into a tar layer.
+pkg_tar(
+    name = "binary_layer",
+    srcs = ["//cmd/llm-bridge"],
+    package_dir = "/usr/local/bin",
+)
+
+# OCI image: Alpine base + Go binary.
+# For production (with Node.js + Claude CLI), use Dockerfile instead.
+oci_image(
+    name = "image",
+    base = "@alpine",
+    cmd = [
+        "serve",
+        "--config",
+        "/etc/llm-bridge/llm-bridge.yaml",
+    ],
+    entrypoint = ["/usr/local/bin/llm-bridge"],
+    tars = [":binary_layer"],
+)
+
+oci_load(
+    name = "image_load",
+    image = ":image",
+    repo_tags = ["llm-bridge:dev"],
+)
