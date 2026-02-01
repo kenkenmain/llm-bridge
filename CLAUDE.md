@@ -63,15 +63,42 @@ bazel build //... --config=race  # Go race detector
 
 ## Run
 
+### Local / Bare Metal (preferred for servers you control)
+
+Bazel builds are hermetic — only Bazelisk and Node.js (for Claude CLI) are needed on the host. No Go install required.
+
 ```bash
+# One-time: install Claude CLI
+npm install -g @anthropic-ai/claude-code
+
+# Build and run
+bazel build //cmd/llm-bridge
 export DISCORD_BOT_TOKEN=your_token
 export ANTHROPIC_API_KEY=your_key   # required by Claude CLI
-./llm-bridge serve --config llm-bridge.yaml
+./bazel-bin/cmd/llm-bridge/llm-bridge_/llm-bridge serve --config llm-bridge.yaml
 ```
 
-## Docker
+For production, use a systemd unit for process management (auto-restart, journald logging):
 
-Two-stage build (base image has Node.js + Claude CLI):
+```ini
+[Unit]
+Description=llm-bridge
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/llm-bridge serve --config /etc/llm-bridge/llm-bridge.yaml
+Environment=DISCORD_BOT_TOKEN=xxx
+Environment=ANTHROPIC_API_KEY=xxx
+Restart=always
+User=llm-bridge
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Docker (optional — for single-artifact deploys)
+
+Docker bundles Node.js + Claude CLI + the Go binary. Useful when you want a single deployable artifact rather than managing Node.js on the host. Two-stage build:
 
 ```bash
 docker build -f Dockerfile.base -t llm-bridge-base:latest .  # once
@@ -80,6 +107,8 @@ mkdir -p .build && cp -L bazel-bin/cmd/llm-bridge/llm-bridge_/llm-bridge .build/
 docker build -t llm-bridge:latest .
 docker compose up -d
 ```
+
+Note: Docker requires bind-mounting host repo directories (see `docker-compose.yml`). Running bare metal avoids this indirection entirely.
 
 ## Add Repo
 
@@ -107,6 +136,16 @@ docker compose up -d
 - Only `claude` LLM backend exists (Codex was removed). Factory defaults empty string to `claude`
 - Claude is spawned via PTY (`creack/pty`), not stdin pipe — output parsing depends on terminal behavior
 - `llm-bridge.yaml.example` was removed; see `internal/config/` tests for config structure
+- Bazel builds are fully hermetic (Go SDK downloaded automatically) — only Bazelisk + Node.js needed on host
+- Docker solves deployment packaging, not build reproducibility (Bazel already handles that)
+
+## TODO
+
+- [ ] **Session persistence** — Wrap Claude in tmux (`tmux new-session -d -s claude-{repo} claude`) so sessions survive bridge crashes. Read output via `tmux capture-pane` instead of direct PTY. Inspired by [disclaude/app](https://github.com/disclaude/app)
+- [ ] **Session recovery on restart** — Rediscover orphaned tmux sessions on startup and reconnect to their Discord channels (similar to disclaude's `/claude sync`)
+- [ ] **Path allowlisting** — Validate `working_dir` against an allowlist of base paths before spawning Claude, especially if session creation is ever exposed to Discord users
+- [ ] **Dual access to sessions** — Allow `tmux attach` to a running Claude session while it's also being driven via Discord, for live debugging
+- [ ] **Bot presence** — Update Discord bot status to show active session count (e.g. `Watching 3 sessions`)
 
 ## CI
 
