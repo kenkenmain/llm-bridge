@@ -1,0 +1,16 @@
+# Runtime base image with Node.js and Claude CLI.
+# Build once, then use as the base for Dockerfile:
+#   docker build -f Dockerfile.base -t llm-bridge-base:latest .
+FROM alpine:3.19
+
+RUN apk add --no-cache \
+    ca-certificates \
+    nodejs \
+    npm \
+    bash \
+    git
+
+# Install Claude CLI
+RUN npm install -g @anthropic-ai/claude-code || true
+
+RUN mkdir -p /etc/llm-bridge

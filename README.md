@@ -13,21 +13,25 @@ Go service that bridges Discord and Terminal interfaces to Claude CLI, enabling 
 
 ## Prerequisites
 
-- Go 1.21+ (for local development/debugging)
-- Docker & Docker Compose (for running and CI)
+- [Bazelisk](https://github.com/bazelbuild/bazelisk) (auto-downloads Bazel 8.5.1)
+- Docker & Docker Compose (for running)
 - Discord bot token
 
 ## Quick Start
 
-### Local Development (Debug)
+### Build & Test
 
 ```bash
-# Build with debug symbols and race detector
-make debug
+bazel build //cmd/llm-bridge    # build the binary
+bazel test //...                 # run all tests
+bazel test //:lint               # run linter
+```
 
-# Run
+### Run Locally
+
+```bash
 export DISCORD_BOT_TOKEN=your_token
-./llm-bridge serve --config llm-bridge.yaml
+bazel-bin/cmd/llm-bridge/llm-bridge_/llm-bridge serve --config llm-bridge.yaml
 ```
 
 ### Docker (Production)
@@ -43,22 +47,23 @@ docker-compose up -d
 
 ## Development
 
-### Local Go (Debugging)
-
 ```bash
-make build          # Standard build
-make debug          # Build with race detector + debug symbols
-make test           # Run tests locally
-make lint           # Run linter locally
+bazel build //...               # build everything
+bazel test //...                 # run all tests
+bazel test //:lint               # golangci-lint
+bazel run //:gazelle             # regenerate BUILD files after import changes
 ```
 
-### Docker (CI-equivalent)
+### Makefile Shortcuts
 
 ```bash
-make docker-test    # Run tests in container
-make docker-lint    # Run linter in container
-make docker-build   # Build in container
-make docker         # Build Docker image
+make build          # bazel build //cmd/llm-bridge
+make test           # bazel test //...
+make lint           # bazel test //:lint
+make gazelle        # bazel run //:gazelle
+make image          # build and load OCI image
+make run            # docker-compose up -d
+make stop           # docker-compose down
 ```
 
 ## Configuration
@@ -111,9 +116,8 @@ internal/
 
 ## CI
 
-GitHub Actions runs on PRs with the `ci` label:
-- Tests and coverage (90% threshold) in Docker container
-- Linting via golangci-lint Docker image
+GitHub Actions runs automatically on PRs to `main` and pushes to `main`:
+- Bazel build, test, and lint
 - Docker image build verification
 
 ## License

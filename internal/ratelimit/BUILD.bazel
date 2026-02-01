@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "ratelimit",
+    srcs = ["limiter.go"],
+    importpath = "github.com/anthropics/llm-bridge/internal/ratelimit",
+    visibility = ["//:__subpackages__"],
+    deps = ["@org_golang_x_time//rate"],
+)
+
+go_test(
+    name = "ratelimit_test",
+    srcs = ["limiter_test.go"],
+    embed = [":ratelimit"],
+)

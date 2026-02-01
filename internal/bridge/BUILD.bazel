@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "bridge",
+    srcs = [
+        "bridge.go",
+        "merger.go",
+    ],
+    importpath = "github.com/anthropics/llm-bridge/internal/bridge",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//internal/config",
+        "//internal/llm",
+        "//internal/output",
+        "//internal/provider",
+        "//internal/ratelimit",
+        "//internal/router",
+    ],
+)
+
+go_test(
+    name = "bridge_test",
+    srcs = [
+        "bridge_test.go",
+        "merger_test.go",
+        "mock_llm_test.go",
+    ],
+    embed = [":bridge"],
+    deps = [
+        "//internal/config",
+        "//internal/llm",
+        "//internal/provider",
+        "//internal/router",
+    ],
+)

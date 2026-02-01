@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "output",
+    srcs = ["output.go"],
+    importpath = "github.com/anthropics/llm-bridge/internal/output",
+    visibility = ["//:__subpackages__"],
+)
+
+go_test(
+    name = "output_test",
+    srcs = ["output_test.go"],
+    embed = [":output"],
+)

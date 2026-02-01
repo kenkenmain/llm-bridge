@@ -2,64 +2,56 @@ name: CI
 
 on:
   pull_request:
-    types: [labeled, synchronize]
-    branches: [main, develop]
+    branches: [main]
+  push:
+    branches: [main]
 
 jobs:
-  ci:
-    if: contains(github.event.pull_request.labels.*.name, 'ci')
+  bazel:
     runs-on: ubuntu-latest
-    container:
-      image: golang:1.21
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Verify dependencies
-        run: go mod verify
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
 
       - name: Build
-        run: go build -buildvcs=false -v ./...
+        run: bazel build //...
 
       - name: Test
-        run: go test -v -race -coverprofile=coverage.out ./...
-
-      - name: Check coverage threshold
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Total coverage: ${COVERAGE}%"
-          THRESHOLD=90
-          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
-            echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
-            exit 1
-          fi
-          echo "Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: false
-
-  lint:
-    if: contains(github.event.pull_request.labels.*.name, 'ci')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+        run: bazel test //... --config=ci
 
       - name: Lint
-        run: docker run --rm -v ${{ github.workspace }}:/app -w /app golangci/golangci-lint:latest golangci-lint run
+        run: bazel test //:lint --config=ci
 
   docker:
-    if: contains(github.event.pull_request.labels.*.name, 'ci')
+    needs: bazel
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker image
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: Build base image
+        run: docker build -f Dockerfile.base -t llm-bridge-base:latest .
+
+      - name: Build Go binary and stage
+        run: |
+          bazel build //cmd/llm-bridge
+          mkdir -p .build
+          cp -L bazel-bin/cmd/llm-bridge/llm-bridge_/llm-bridge .build/llm-bridge
+
+      - name: Build production image
         run: docker build -t llm-bridge:test .
 
-      - name: Verify Docker image
+      - name: Verify image
         run: docker run --rm llm-bridge:test --help

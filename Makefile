@@ -1,45 +1,36 @@
-.PHONY: build debug run clean test lint deps docker docker-run docker-stop docker-test docker-lint docker-build
+.PHONY: build test lint gazelle image docker clean run stop
 
-BINARY=llm-bridge
-VERSION?=dev
-DOCKER_GO=docker run --rm -v $(PWD):/app -w /app golang:1.21
+BAZEL=bazel
 
 build:
-	go build -o $(BINARY) ./cmd/llm-bridge
-
-debug:
-	go build -race -gcflags="all=-N -l" -o $(BINARY) ./cmd/llm-bridge
-
-run: build
-	./$(BINARY) serve
-
-clean:
-	rm -f $(BINARY)
+	$(BAZEL) build //cmd/llm-bridge
 
 test:
-	go test -v ./...
+	$(BAZEL) test //...
 
 lint:
-	golangci-lint run
+	$(BAZEL) test //:lint
 
-deps:
-	go mod download
-	go mod tidy
+gazelle:
+	$(BAZEL) run //:gazelle
 
-docker:
-	docker build -t llm-bridge:$(VERSION) .
+image:
+	$(BAZEL) build //:image
+	$(BAZEL) run //:image_load
 
-docker-run:
+docker: build
+	mkdir -p .build
+	cp -L bazel-bin/cmd/llm-bridge/llm-bridge_/llm-bridge .build/llm-bridge
+	docker build -f Dockerfile.base -t llm-bridge-base:latest .
+	docker build -t llm-bridge:latest .
+	rm -rf .build
+
+clean:
+	$(BAZEL) clean
+	rm -rf .build
+
+run:
 	docker-compose up -d
 
-docker-stop:
+stop:
 	docker-compose down
-
-docker-test:
-	$(DOCKER_GO) go test -v -race -coverprofile=coverage.out ./...
-
-docker-lint:
-	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:latest golangci-lint run
-
-docker-build:
-	$(DOCKER_GO) go build -buildvcs=false -o $(BINARY) ./cmd/llm-bridge
