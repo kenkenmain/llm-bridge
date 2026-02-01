@@ -7,6 +7,9 @@ Go service bridging Discord/Terminal to Claude CLI.
 This project uses **Bazel 8.5.1** for hermetic builds, testing, and linting.
 Install [Bazelisk](https://github.com/bazelbuild/bazelisk) (auto-downloads the correct Bazel version).
 
+- **Go 1.23.6** (managed by Bazel via `go_sdk.download` in MODULE.bazel — no local install needed)
+- **Claude CLI** (`@anthropic-ai/claude-code`) — runtime dependency, spawned as child process via PTY
+
 ## Dependencies
 
 Prefer well-known open source libraries over hand-rolled implementations.
@@ -38,17 +41,44 @@ bazel test //:lint              # run golangci-lint
 bazel run //:gazelle            # after changing imports or adding files
 ```
 
+## Make (shortcuts)
+
+The Makefile wraps Bazel commands for convenience:
+
+```bash
+make build     # bazel build //cmd/llm-bridge
+make test      # bazel test //...
+make lint      # bazel test //:lint
+make gazelle   # bazel run //:gazelle
+make docker    # full Docker build (base + prod image)
+make image     # Bazel OCI image build + load
+```
+
+## Bazel Configs
+
+```bash
+bazel test //... --config=ci     # CI caching + verbose output
+bazel build //... --config=race  # Go race detector
+```
+
 ## Run
 
 ```bash
 export DISCORD_BOT_TOKEN=your_token
+export ANTHROPIC_API_KEY=your_key   # required by Claude CLI
 ./llm-bridge serve --config llm-bridge.yaml
 ```
 
 ## Docker
 
+Two-stage build (base image has Node.js + Claude CLI):
+
 ```bash
-docker-compose up -d
+docker build -f Dockerfile.base -t llm-bridge-base:latest .  # once
+bazel build //cmd/llm-bridge
+mkdir -p .build && cp -L bazel-bin/cmd/llm-bridge/llm-bridge_/llm-bridge .build/llm-bridge
+docker build -t llm-bridge:latest .
+docker compose up -d
 ```
 
 ## Add Repo
@@ -71,15 +101,12 @@ docker-compose up -d
 - `internal/router/` - Command routing (/, !)
 - `internal/output/` - Output handling, file attachments
 
-## Features
+## Gotchas
 
-- **Input merging** - Multiple sources merged to LLM stdin
-- **Conflict prefixing** - `[Discord]` prefix when sources collide
-- **Output broadcast** - All output sent to ALL connected channels
-- **Idle timeout** - LLM process stops after idle period
-- **Claude CLI** - Claude as the LLM backend
-- **Terminal** - Local stdin/stdout always enabled
-- **Rate limiting** - Per-user and per-channel token-bucket rate limiting
+- Lint runs **outside Bazel sandbox** (`no-sandbox` tag) — needs network for first `golangci-lint` download
+- Only `claude` LLM backend exists (Codex was removed). Factory defaults empty string to `claude`
+- Claude is spawned via PTY (`creack/pty`), not stdin pipe — output parsing depends on terminal behavior
+- `llm-bridge.yaml.example` was removed; see `internal/config/` tests for config structure
 
 ## CI
 
