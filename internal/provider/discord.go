@@ -62,7 +62,7 @@ func (d *Discord) Stop() error {
 	d.stopped = true
 
 	if d.session != nil {
-		d.session.Close()
+		_ = d.session.Close()
 	}
 	close(d.messages)
 	return nil

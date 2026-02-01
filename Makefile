@@ -42,4 +42,4 @@ docker-lint:
 	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:latest golangci-lint run
 
 docker-build:
-	$(DOCKER_GO) go build -o $(BINARY) ./cmd/llm-bridge
+	$(DOCKER_GO) go build -buildvcs=false -o $(BINARY) ./cmd/llm-bridge

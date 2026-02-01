@@ -89,8 +89,7 @@ func TestLoad_EnvVarExpansion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	os.Setenv("TEST_BOT_TOKEN", "secret-token-123")
-	defer os.Unsetenv("TEST_BOT_TOKEN")
+	t.Setenv("TEST_BOT_TOKEN", "secret-token-123")
 
 	content := `
 repos: {}

@@ -1300,7 +1300,7 @@ func TestBridge_ReadOutput_WithOutput(t *testing.T) {
 
 	// Write some output and close
 	_, _ = pw.Write([]byte("Hello, world!\n"))
-	pw.Close()
+	_ = pw.Close()
 
 	select {
 	case <-done:
@@ -1345,7 +1345,7 @@ func TestBridge_ReadOutput_BufferFlush(t *testing.T) {
 
 	// Write more than threshold
 	_, _ = pw.Write([]byte("This is a longer message that exceeds the threshold\n"))
-	pw.Close()
+	_ = pw.Close()
 
 	select {
 	case <-done:

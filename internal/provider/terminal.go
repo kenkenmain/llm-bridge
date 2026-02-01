@@ -87,8 +87,8 @@ func (t *Terminal) Send(channelID string, content string) error {
 }
 
 func (t *Terminal) SendFile(channelID string, filename string, content []byte) error {
-	fmt.Fprintf(t.writer, "--- %s ---\n%s\n--- end ---\n", filename, string(content))
-	return nil
+	_, err := fmt.Fprintf(t.writer, "--- %s ---\n%s\n--- end ---\n", filename, string(content))
+	return err
 }
 
 func (t *Terminal) Messages() <-chan Message {
