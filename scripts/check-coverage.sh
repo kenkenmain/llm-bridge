@@ -86,6 +86,9 @@ if [[ ${#EXCLUDES[@]} -eq 0 ]]; then
     EXCLUDES=("^cmd/")
 fi
 
+# Always exclude external dependencies (Bazel sandbox paths for third-party code).
+EXCLUDES+=("^external/")
+
 # ─── Threshold validation ───────────────────────────────────────────────────
 
 if ! [[ "$THRESHOLD" =~ ^[0-9]+$ ]]; then

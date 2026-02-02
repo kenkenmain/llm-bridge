@@ -27,7 +27,7 @@ jobs:
 
       - name: Coverage
         run: |
-          bazel coverage //... --combined_report=lcov --config=ci
+          bazel coverage //internal/... --combined_report=lcov --config=ci
           scripts/check-coverage.sh \
             --lcov-file bazel-out/_coverage/_coverage_report.dat \
             --threshold 90 \

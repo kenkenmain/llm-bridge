@@ -17,4 +17,4 @@ test:ci --test_output=all
 
 # Coverage config
 coverage --combined_report=lcov
-coverage --instrumentation_filter=//internal/[:]
+coverage --instrumentation_filter=//internal/

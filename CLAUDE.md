@@ -70,7 +70,7 @@ make image     # Bazel OCI image build + load
 ```bash
 bazel test //... --config=ci     # CI caching + verbose output
 bazel build //... --config=race  # Go race detector
-bazel coverage //...             # uses --combined_report=lcov and --instrumentation_filter=//internal/[:] from .bazelrc
+bazel coverage //...             # uses --combined_report=lcov and --instrumentation_filter=//internal/ from .bazelrc
 ```
 
 ## Run

@@ -12,7 +12,7 @@ lint:
 	$(BAZEL) test //:lint
 
 coverage:
-	$(BAZEL) coverage //...
+	$(BAZEL) coverage //internal/...
 	./scripts/check-coverage.sh
 
 gazelle:
