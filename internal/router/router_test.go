@@ -43,6 +43,7 @@ func TestParse_LLMCommands(t *testing.T) {
 		{"unknown slash with args", "/review-pr 123", "/review-pr 123"},
 		{"plain text", "refactor the auth module", "refactor the auth module"},
 		{"whitespace trimmed", "  hello world  ", "hello world"},
+		{"old ! prefix is plain text", "!commit", "!commit"},
 	}
 
 	for _, tt := range tests {
@@ -58,15 +59,15 @@ func TestParse_LLMCommands(t *testing.T) {
 	}
 }
 
-func TestParse_ExclamationTranslation(t *testing.T) {
+func TestParse_DoubleColonTranslation(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   string
 		wantRaw string
 	}{
-		{"!commit to /commit", "!commit", "/commit"},
-		{"!review-pr with args", "!review-pr 123", "/review-pr 123"},
-		{"!help to /help", "!help", "/help"},
+		{"::commit to /commit", "::commit", "/commit"},
+		{"::review-pr with args", "::review-pr 123", "/review-pr 123"},
+		{"::help to /help", "::help", "/help"},
 	}
 
 	for _, tt := range tests {
