@@ -631,7 +631,7 @@ func TestBridge_ProcessMessage_LLMRoute(t *testing.T) {
 	}
 }
 
-func TestBridge_ProcessMessage_ExclamationCommand(t *testing.T) {
+func TestBridge_ProcessMessage_DoubleColonCommand(t *testing.T) {
 	cfg := testConfig()
 	b := New(cfg)
 
@@ -648,7 +648,7 @@ func TestBridge_ProcessMessage_ExclamationCommand(t *testing.T) {
 
 	msg := provider.Message{
 		ChannelID: "channel-123",
-		Content:   "!commit",
+		Content:   "::commit",
 		Source:    "discord",
 	}
 

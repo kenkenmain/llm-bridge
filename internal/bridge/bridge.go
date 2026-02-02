@@ -205,7 +205,7 @@ func (b *Bridge) handleBridgeCommand(prov provider.Provider, channelID string, r
 	case "restart":
 		response = b.restartLLM(channelID)
 	case "help":
-		response = "Commands: /status, /cancel, /restart, /help, /select <repo>\nSkills: !commit, !review-pr, etc."
+		response = "Commands: /status, /cancel, /restart, /help, /select <repo>\nSkills: ::commit, ::review-pr, etc."
 	default:
 		response = fmt.Sprintf("Unknown command: %s", route.Command)
 	}

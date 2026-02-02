@@ -100,7 +100,7 @@ See `llm-bridge.yaml.example` for all options.
 | `/restart`       | Restart LLM process           |
 | `/select <repo>` | Select repo for terminal      |
 | `/help`          | Show available commands        |
-| `!commit`        | Translates to `/commit` for LLM |
+| `::commit`       | Translates to `/commit` for LLM |
 
 ## Architecture
 
@@ -112,7 +112,7 @@ internal/
   llm/              LLM interface, Claude PTY wrapper
   provider/         Discord and Terminal providers
   ratelimit/        Token-bucket rate limiting
-  router/           Command routing (/ and ! prefixes)
+  router/           Command routing (/ and :: prefixes)
   output/           Output formatting, file attachments
 ```
 

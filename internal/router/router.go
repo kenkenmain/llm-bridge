@@ -11,6 +11,8 @@ const (
 	RouteToBridge
 )
 
+const LLMCommandPrefix = "::"
+
 type Route struct {
 	Type    RouteType
 	Command string
@@ -45,8 +47,8 @@ func Parse(content string) Route {
 		}
 	}
 
-	if strings.HasPrefix(content, "!") {
-		translated := "/" + content[1:]
+	if strings.HasPrefix(content, LLMCommandPrefix) {
+		translated := "/" + strings.TrimPrefix(content, LLMCommandPrefix)
 		return Route{
 			Type: RouteToLLM,
 			Raw:  translated,

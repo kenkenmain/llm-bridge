@@ -139,7 +139,7 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 - `internal/llm/` - LLM interface, Claude wrapper (PTY-based)
 - `internal/provider/` - Discord/Terminal providers
 - `internal/ratelimit/` - Per-user and per-channel rate limiting
-- `internal/router/` - Command routing (/, !)
+- `internal/router/` - Command routing (/, ::)
 - `internal/output/` - Output handling, file attachments
 
 ## Gotchas
@@ -175,5 +175,5 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 | `/restart`       | Bridge  | Restart LLM process           |
 | `/select <repo>` | Bridge  | Select repo for terminal      |
 | `/help`          | Bridge  | Show available commands        |
-| `!commit`        | LLM     | Translates to `/commit`       |
+| `::commit`       | LLM     | Translates to `/commit`       |
 | text             | LLM     | Raw message to LLM            |
