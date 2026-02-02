@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -310,5 +311,333 @@ defaults:
 
 	if cfg.Defaults.RateLimit.GetRateLimitEnabled() {
 		t.Error("rate limiting should be disabled when enabled: false in YAML")
+	}
+}
+
+func TestLoad_WithWorktrees(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature-auth
+        path: /code/myproject-auth
+        channel_id: "222222"
+      - name: bugfix-crash
+        path: /code/myproject-crash
+        channel_id: "333333"
+        branch: bugfix/crash
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Repos) != 3 {
+		t.Fatalf("len(Repos) = %d, want 3", len(cfg.Repos))
+	}
+
+	auth, ok := cfg.Repos["myproject/feature-auth"]
+	if !ok {
+		t.Fatal("missing repo entry myproject/feature-auth")
+	}
+	if auth.ChannelID != "222222" {
+		t.Errorf("feature-auth ChannelID = %q, want %q", auth.ChannelID, "222222")
+	}
+	if auth.WorkingDir != "/code/myproject-auth" {
+		t.Errorf("feature-auth WorkingDir = %q, want %q", auth.WorkingDir, "/code/myproject-auth")
+	}
+	if auth.GitRoot != "/code/myproject" {
+		t.Errorf("feature-auth GitRoot = %q, want %q", auth.GitRoot, "/code/myproject")
+	}
+
+	crash, ok := cfg.Repos["myproject/bugfix-crash"]
+	if !ok {
+		t.Fatal("missing repo entry myproject/bugfix-crash")
+	}
+	if crash.ChannelID != "333333" {
+		t.Errorf("bugfix-crash ChannelID = %q, want %q", crash.ChannelID, "333333")
+	}
+	if crash.Branch != "bugfix/crash" {
+		t.Errorf("bugfix-crash Branch = %q, want %q", crash.Branch, "bugfix/crash")
+	}
+}
+
+func TestLoad_WorktreeExpansion_Inherits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: child
+        path: /code/myproject-child
+        channel_id: "222222"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	child, ok := cfg.Repos["myproject/child"]
+	if !ok {
+		t.Fatal("missing repo entry myproject/child")
+	}
+	if child.Provider != "discord" {
+		t.Errorf("child Provider = %q, want %q (inherited from parent)", child.Provider, "discord")
+	}
+	if child.LLM != "claude" {
+		t.Errorf("child LLM = %q, want %q (inherited from parent)", child.LLM, "claude")
+	}
+}
+
+func TestLoad_WorktreeExpansion_PreservesParent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: child
+        path: /code/myproject-child
+        channel_id: "222222"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	parent, ok := cfg.Repos["myproject"]
+	if !ok {
+		t.Fatal("parent repo entry myproject should still exist")
+	}
+	if parent.ChannelID != "111111" {
+		t.Errorf("parent ChannelID = %q, want %q", parent.ChannelID, "111111")
+	}
+	if parent.WorkingDir != "/code/myproject" {
+		t.Errorf("parent WorkingDir = %q, want %q", parent.WorkingDir, "/code/myproject")
+	}
+	if parent.Provider != "discord" {
+		t.Errorf("parent Provider = %q, want %q", parent.Provider, "discord")
+	}
+	if len(parent.Worktrees) != 1 {
+		t.Errorf("parent Worktrees len = %d, want 1", len(parent.Worktrees))
+	}
+}
+
+func TestLoad_NoWorktrees_BackwardCompatible(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  simple-repo:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/simple
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Repos) != 1 {
+		t.Errorf("len(Repos) = %d, want 1", len(cfg.Repos))
+	}
+
+	repo, ok := cfg.Repos["simple-repo"]
+	if !ok {
+		t.Fatal("missing repo entry simple-repo")
+	}
+	if repo.ChannelID != "111111" {
+		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "111111")
+	}
+	if len(repo.Worktrees) != 0 {
+		t.Errorf("repo.Worktrees len = %d, want 0", len(repo.Worktrees))
+	}
+}
+
+func TestConfig_Validate_DuplicateChannelIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  repo-a:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/a
+  repo-b:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/b
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for duplicate channel_id")
+	}
+	if !strings.Contains(err.Error(), "duplicate channel_id") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "duplicate channel_id")
+	}
+}
+
+func TestConfig_Validate_EmptyWorktreePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: bad-wt
+        path: ""
+        channel_id: "222222"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for empty worktree path")
+	}
+	if !strings.Contains(err.Error(), "empty path") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "empty path")
+	}
+}
+
+func TestConfig_Validate_RelativeWorktreePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: bad-wt
+        path: relative/path
+        channel_id: "222222"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for relative worktree path")
+	}
+	if !strings.Contains(err.Error(), "non-absolute path") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "non-absolute path")
+	}
+}
+
+func TestConfig_Validate_EmptyWorktreeName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: ""
+        path: /code/myproject-wt
+        channel_id: "222222"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for empty worktree name")
+	}
+	if !strings.Contains(err.Error(), "empty name") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "empty name")
+	}
+}
+
+func TestConfig_Validate_Valid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature
+        path: /code/myproject-feature
+        channel_id: "222222"
+  other-repo:
+    provider: discord
+    channel_id: "333333"
+    llm: claude
+    working_dir: /code/other
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Repos) != 3 {
+		t.Errorf("len(Repos) = %d, want 3", len(cfg.Repos))
 	}
 }

@@ -96,6 +96,16 @@ func TestParse_BridgeCommandArgs(t *testing.T) {
 	}
 }
 
+func TestParse_Worktrees(t *testing.T) {
+	route := Parse("/worktrees")
+	if route.Type != RouteToBridge {
+		t.Errorf("route type = %v, want RouteToBridge", route.Type)
+	}
+	if route.Command != "worktrees" {
+		t.Errorf("route command = %q, want %q", route.Command, "worktrees")
+	}
+}
+
 func TestParseCommand(t *testing.T) {
 	tests := []struct {
 		input   string
