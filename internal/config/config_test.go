@@ -405,3 +405,97 @@ defaults:
 		t.Errorf("Load() should succeed when working_dir is under allowed_paths: %v", err)
 	}
 }
+
+func TestDefaults_GetTmuxEnabled(t *testing.T) {
+	t.Run("nil returns false", func(t *testing.T) {
+		d := Defaults{}
+		if got := d.GetTmuxEnabled(); got != false {
+			t.Errorf("GetTmuxEnabled() = %v, want false", got)
+		}
+	})
+
+	t.Run("explicit true", func(t *testing.T) {
+		val := true
+		d := Defaults{TmuxEnabled: &val}
+		if got := d.GetTmuxEnabled(); got != true {
+			t.Errorf("GetTmuxEnabled() = %v, want true", got)
+		}
+	})
+
+	t.Run("explicit false", func(t *testing.T) {
+		val := false
+		d := Defaults{TmuxEnabled: &val}
+		if got := d.GetTmuxEnabled(); got != false {
+			t.Errorf("GetTmuxEnabled() = %v, want false", got)
+		}
+	})
+}
+
+func TestDefaults_GetAllowedPaths(t *testing.T) {
+	t.Run("nil returns nil", func(t *testing.T) {
+		d := Defaults{}
+		if got := d.GetAllowedPaths(); got != nil {
+			t.Errorf("GetAllowedPaths() = %v, want nil", got)
+		}
+	})
+
+	t.Run("returns configured paths", func(t *testing.T) {
+		d := Defaults{AllowedPaths: []string{"/home/user", "/opt/repos"}}
+		got := d.GetAllowedPaths()
+		if len(got) != 2 {
+			t.Fatalf("GetAllowedPaths() len = %d, want 2", len(got))
+		}
+		if got[0] != "/home/user" || got[1] != "/opt/repos" {
+			t.Errorf("GetAllowedPaths() = %v, want [/home/user /opt/repos]", got)
+		}
+	})
+}
+
+func TestLoad_TmuxEnabledConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+defaults:
+  tmux_enabled: true
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.Defaults.GetTmuxEnabled() {
+		t.Error("GetTmuxEnabled() should be true when tmux_enabled: true in YAML")
+	}
+}
+
+func TestLoad_AllowedPathsConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+defaults:
+  allowed_paths:
+    - /home/user/repos
+    - /opt/code
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	paths := cfg.Defaults.GetAllowedPaths()
+	if len(paths) != 2 {
+		t.Fatalf("AllowedPaths len = %d, want 2", len(paths))
+	}
+}

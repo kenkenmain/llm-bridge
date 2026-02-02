@@ -22,6 +22,7 @@ go_test(
         "factory_test.go",
         "tmux_claude_test.go",
         "tmux_executor_mock_test.go",
+        "tmux_executor_test.go",
         "tmux_utils_test.go",
     ],
     embed = [":llm"],
