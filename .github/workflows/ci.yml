@@ -25,6 +25,22 @@ jobs:
       - name: Test
         run: bazel test //... --config=ci
 
+      - name: Coverage
+        run: |
+          bazel coverage //... --combined_report=lcov --config=ci
+          scripts/check-coverage.sh \
+            --lcov-file bazel-out/_coverage/_coverage_report.dat \
+            --threshold 90 \
+            --exclude "^cmd/"
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: bazel-out/_coverage/_coverage_report.dat
+          retention-days: 14
+
       - name: Lint
         run: bazel test //:lint --config=ci
 

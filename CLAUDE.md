@@ -29,6 +29,16 @@ bazel build //...               # build everything
 bazel test //...                # run all tests
 ```
 
+## Coverage
+
+```bash
+make coverage                          # run coverage check locally (90% threshold)
+bazel coverage //...                   # generate coverage report only
+bazel test //:coverage_check_test      # run coverage script self-test
+```
+
+Coverage enforces a 90% line-coverage threshold on `internal/` packages. The `cmd/` package is excluded. See `scripts/check-coverage.sh` for options (`--threshold`, `--exclude`, `--lcov-file`).
+
 ## Lint
 
 ```bash
@@ -49,6 +59,7 @@ The Makefile wraps Bazel commands for convenience:
 make build     # bazel build //cmd/llm-bridge
 make test      # bazel test //...
 make lint      # bazel test //:lint
+make coverage  # bazel coverage //... + threshold check (90%)
 make gazelle   # bazel run //:gazelle
 make docker    # full Docker build (base + prod image)
 make image     # Bazel OCI image build + load
@@ -59,6 +70,7 @@ make image     # Bazel OCI image build + load
 ```bash
 bazel test //... --config=ci     # CI caching + verbose output
 bazel build //... --config=race  # Go race detector
+bazel coverage //...             # uses --combined_report=lcov and --instrumentation_filter=//internal/[:] from .bazelrc
 ```
 
 ## Run
@@ -151,6 +163,7 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 
 - GitHub Actions on PRs to `main` and pushes to `main` (automatic, no label required)
 - Bazel build, test, and lint
+- Coverage enforcement: 90% line-coverage threshold on `internal/` packages (report uploaded as artifact on every run)
 - Docker image build verification
 
 ## Commands

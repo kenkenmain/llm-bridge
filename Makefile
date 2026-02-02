@@ -1,4 +1,4 @@
-.PHONY: build test lint gazelle image docker clean run stop
+.PHONY: build test lint coverage gazelle image docker clean run stop
 
 BAZEL=bazel
 
@@ -10,6 +10,10 @@ test:
 
 lint:
 	$(BAZEL) test //:lint
+
+coverage:
+	$(BAZEL) coverage //...
+	./scripts/check-coverage.sh
 
 gazelle:
 	$(BAZEL) run //:gazelle
