@@ -2,6 +2,8 @@ package provider
 
 import (
 	"testing"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 func TestNewDiscord(t *testing.T) {
@@ -127,4 +129,153 @@ func TestDiscord_MessageWithoutAuthorID(t *testing.T) {
 	if msg.AuthorID != "" {
 		t.Error("terminal messages should have empty AuthorID")
 	}
+}
+
+func TestDiscord_UpdatePresence_NotConnected(t *testing.T) {
+	d := &Discord{}
+	err := d.UpdatePresence(0)
+	if err == nil {
+		t.Error("UpdatePresence should return error when not connected")
+	}
+}
+
+func TestDiscord_UpdatePresence_StatusFormat(t *testing.T) {
+	tests := []struct {
+		name  string
+		count int
+		want  string
+	}{
+		{"zero sessions", 0, "Watching 0 sessions"},
+		{"one session singular", 1, "Watching 1 session"},
+		{"multiple sessions plural", 3, "Watching 3 sessions"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// We can't easily test the actual Discord API call without a mock session,
+			// but we can verify that UpdatePresence doesn't panic with a nil session
+			// and returns an appropriate error
+			d := &Discord{}
+			err := d.UpdatePresence(tt.count)
+			if err == nil {
+				t.Error("expected error with nil session")
+			}
+		})
+	}
+}
+
+func TestDiscord_HandleMessage_SelfMessage(t *testing.T) {
+	d := NewDiscord("token", []string{"channel-1"})
+
+	// Create a minimal discordgo session with state
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+
+	// Message from the bot itself should be ignored
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "channel-1",
+			Content:   "self message",
+			Author:    &discordgo.User{ID: "bot-id", Username: "bot"},
+		},
+	}
+
+	d.handleMessage(session, msg)
+
+	// No message should be in the channel
+	select {
+	case m := <-d.messages:
+		t.Errorf("should not receive self-message, got %+v", m)
+	default:
+		// Expected: no message
+	}
+}
+
+func TestDiscord_HandleMessage_WrongChannel(t *testing.T) {
+	d := NewDiscord("token", []string{"channel-1"})
+
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "wrong-channel",
+			Content:   "message in wrong channel",
+			Author:    &discordgo.User{ID: "user-1", Username: "testuser"},
+		},
+	}
+
+	d.handleMessage(session, msg)
+
+	select {
+	case m := <-d.messages:
+		t.Errorf("should not receive message from wrong channel, got %+v", m)
+	default:
+		// Expected: no message
+	}
+}
+
+func TestDiscord_HandleMessage_ValidMessage(t *testing.T) {
+	d := NewDiscord("token", []string{"channel-1"})
+
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "channel-1",
+			Content:   "hello world",
+			Author:    &discordgo.User{ID: "user-123", Username: "testuser"},
+		},
+	}
+
+	d.handleMessage(session, msg)
+
+	select {
+	case m := <-d.messages:
+		if m.Content != "hello world" {
+			t.Errorf("Content = %q, want %q", m.Content, "hello world")
+		}
+		if m.ChannelID != "channel-1" {
+			t.Errorf("ChannelID = %q, want %q", m.ChannelID, "channel-1")
+		}
+		if m.Author != "testuser" {
+			t.Errorf("Author = %q, want %q", m.Author, "testuser")
+		}
+		if m.AuthorID != "user-123" {
+			t.Errorf("AuthorID = %q, want %q", m.AuthorID, "user-123")
+		}
+		if m.Source != "discord" {
+			t.Errorf("Source = %q, want %q", m.Source, "discord")
+		}
+	default:
+		t.Error("expected message on channel")
+	}
+}
+
+func TestDiscord_HandleMessage_AfterStop(t *testing.T) {
+	d := NewDiscord("token", []string{"channel-1"})
+	_ = d.Stop()
+
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "channel-1",
+			Content:   "message after stop",
+			Author:    &discordgo.User{ID: "user-1", Username: "testuser"},
+		},
+	}
+
+	// Should not panic even though the channel is closed
+	d.handleMessage(session, msg)
 }

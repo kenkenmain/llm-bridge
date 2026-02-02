@@ -21,4 +21,5 @@ go_test(
         "terminal_test.go",
     ],
     embed = [":provider"],
+    deps = ["@com_github_bwmarrin_discordgo//:discordgo"],
 )

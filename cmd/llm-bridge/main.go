@@ -68,6 +68,13 @@ var addRepoCmd = &cobra.Command{
 			}
 		}
 
+		// Validate working directory against allowed paths
+		if len(cfg.Defaults.AllowedPaths) > 0 {
+			if err := config.ValidateWorkingDir(dirFlag, cfg.Defaults.AllowedPaths); err != nil {
+				return fmt.Errorf("path validation: %w", err)
+			}
+		}
+
 		cfg.Repos[name] = config.RepoConfig{
 			Provider:   providerFlag,
 			ChannelID:  channelFlag,
