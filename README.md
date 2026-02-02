@@ -15,7 +15,19 @@ Go service that bridges Discord and Terminal interfaces to Claude CLI, enabling 
 
 - [Bazelisk](https://github.com/bazelbuild/bazelisk) (auto-downloads Bazel 8.5.1)
 - Docker & Docker Compose (for running)
-- Discord bot token
+- Discord bot token (see [Discord Bot Setup Guide](docs/discord-setup.md))
+
+## Discord Setup
+
+To connect llm-bridge to Discord, you need a bot token and channel IDs. The full setup involves creating a Discord application, enabling the Message Content privileged intent, inviting the bot with the correct permissions, and configuring channel IDs in your `llm-bridge.yaml`.
+
+See the [Discord Bot Setup Guide](docs/discord-setup.md) for step-by-step instructions.
+
+Quick invite URL (replace `YOUR_CLIENT_ID` with your application's Client ID):
+
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot&permissions=101376
+```
 
 ## Quick Start
 
@@ -76,7 +88,7 @@ Copy `llm-bridge.yaml.example` to `llm-bridge.yaml`:
 repos:
   my-repo:
     provider: discord
-    channel_id: "123456789012345678"
+    channel_id: "123456789012345678"  # Discord channel ID (enable Developer Mode to copy)
     llm: claude
     working_dir: /path/to/repo
 
