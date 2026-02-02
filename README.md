@@ -50,6 +50,7 @@ docker-compose up -d
 ```bash
 bazel build //...               # build everything
 bazel test //...                 # run all tests
+bazel coverage //...            # generate coverage report
 bazel test //:lint               # golangci-lint
 bazel run //:gazelle             # regenerate BUILD files after import changes
 ```
@@ -60,6 +61,7 @@ bazel run //:gazelle             # regenerate BUILD files after import changes
 make build          # bazel build //cmd/llm-bridge
 make test           # bazel test //...
 make lint           # bazel test //:lint
+make coverage       # bazel coverage + 90% threshold check
 make gazelle        # bazel run //:gazelle
 make image          # build and load OCI image
 make run            # docker-compose up -d
@@ -118,6 +120,7 @@ internal/
 
 GitHub Actions runs automatically on PRs to `main` and pushes to `main`:
 - Bazel build, test, and lint
+- 90% line-coverage threshold enforcement (coverage report uploaded as artifact)
 - Docker image build verification
 
 ## License
