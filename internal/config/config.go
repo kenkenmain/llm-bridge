@@ -1,9 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -28,7 +30,9 @@ type Defaults struct {
 	OutputThreshold int             `yaml:"output_threshold"`
 	IdleTimeout     string          `yaml:"idle_timeout"`
 	ResumeSession   *bool           `yaml:"resume_session"`
+	TmuxEnabled     *bool           `yaml:"tmux_enabled"`
 	RateLimit       RateLimitConfig `yaml:"rate_limit"`
+	AllowedPaths    []string        `yaml:"allowed_paths"`
 }
 
 // RateLimitConfig holds per-user and per-channel rate limit settings.
@@ -85,6 +89,15 @@ func (r RateLimitConfig) GetChannelBurst() int {
 	return r.ChannelBurst
 }
 
+// GetTmuxEnabled returns whether tmux-based session management is enabled.
+// Defaults to false if not explicitly set.
+func (d Defaults) GetTmuxEnabled() bool {
+	if d.TmuxEnabled == nil {
+		return false
+	}
+	return *d.TmuxEnabled
+}
+
 func (d Defaults) GetClaudePath() string {
 	if d.ClaudePath == "" {
 		return "claude"
@@ -97,6 +110,11 @@ func (d Defaults) GetResumeSession() bool {
 		return true
 	}
 	return *d.ResumeSession
+}
+
+// GetAllowedPaths returns the list of allowed base paths for working directories.
+func (d Defaults) GetAllowedPaths() []string {
+	return d.AllowedPaths
 }
 
 func (d Defaults) GetIdleTimeoutDuration() time.Duration {
@@ -138,9 +156,63 @@ func Load(path string) (*Config, error) {
 		cfg.Defaults.IdleTimeout = "10m"
 	}
 
+	// Validate working directories against allowed paths
+	if len(cfg.Defaults.AllowedPaths) > 0 {
+		for name, repo := range cfg.Repos {
+			if err := ValidateWorkingDir(repo.WorkingDir, cfg.Defaults.AllowedPaths); err != nil {
+				return nil, fmt.Errorf("repo %q: %w", name, err)
+			}
+		}
+	}
+
 	return &cfg, nil
 }
 
 func DefaultPath() string {
 	return filepath.Join(".", "llm-bridge.yaml")
+}
+
+// ValidateWorkingDir checks if the given working directory is under one of the allowed paths.
+// Returns nil if allowedPaths is empty (no restriction) or if the path is valid.
+func ValidateWorkingDir(workingDir string, allowedPaths []string) error {
+	if len(allowedPaths) == 0 {
+		return nil
+	}
+
+	absDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return fmt.Errorf("resolve working dir: %w", err)
+	}
+
+	// Try to resolve symlinks; fall back to Abs() only if path doesn't exist
+	resolvedDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			resolvedDir = absDir
+		} else {
+			return fmt.Errorf("resolve symlinks for working dir: %w", err)
+		}
+	}
+
+	for _, allowed := range allowedPaths {
+		absAllowed, err := filepath.Abs(allowed)
+		if err != nil {
+			continue
+		}
+		resolvedAllowed, err := filepath.EvalSymlinks(absAllowed)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				resolvedAllowed = absAllowed
+			} else {
+				continue
+			}
+		}
+
+		// Check with path separator boundary to prevent /home/allowed matching /home/allowed-extra
+		if resolvedDir == resolvedAllowed || strings.HasPrefix(resolvedDir, resolvedAllowed+string(filepath.Separator)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("working directory %q is not under any allowed path", workingDir)
 }

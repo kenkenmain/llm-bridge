@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -310,5 +311,97 @@ defaults:
 
 	if cfg.Defaults.RateLimit.GetRateLimitEnabled() {
 		t.Error("rate limiting should be disabled when enabled: false in YAML")
+	}
+}
+
+func TestValidateWorkingDir(t *testing.T) {
+	tests := []struct {
+		name         string
+		workingDir   string
+		allowedPaths []string
+		wantErr      bool
+	}{
+		{"empty allowlist allows all", "/any/path", nil, false},
+		{"empty allowlist slice allows all", "/any/path", []string{}, false},
+		{"exact match", "/home/user/repos", []string{"/home/user/repos"}, false},
+		{"subdirectory allowed", "/home/user/repos/myproject", []string{"/home/user/repos"}, false},
+		{"parent not allowed", "/home/user", []string{"/home/user/repos"}, true},
+		{"sibling not allowed", "/home/user/other", []string{"/home/user/repos"}, true},
+		{"separator boundary", "/home/user/repos-extra", []string{"/home/user/repos"}, true},
+		{"multiple allowed paths", "/opt/code/project", []string{"/home/user/repos", "/opt/code"}, false},
+		{"none match", "/tmp/evil", []string{"/home/user/repos", "/opt/code"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateWorkingDir(tt.workingDir, tt.allowedPaths)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateWorkingDir(%q, %v) error = %v, wantErr %v", tt.workingDir, tt.allowedPaths, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateWorkingDir_NonExistentPath(t *testing.T) {
+	// Non-existent directories should still be validated (falls back to Abs only)
+	err := ValidateWorkingDir("/home/user/repos/future-project", []string{"/home/user/repos"})
+	if err != nil {
+		t.Errorf("non-existent subdirectory should be allowed: %v", err)
+	}
+
+	err = ValidateWorkingDir("/tmp/evil/project", []string{"/home/user/repos"})
+	if err == nil {
+		t.Error("non-existent path outside allowed should be rejected")
+	}
+}
+
+func TestLoad_AllowedPathsValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  test-repo:
+    provider: discord
+    channel_id: "123456"
+    llm: claude
+    working_dir: /tmp/test
+defaults:
+  allowed_paths:
+    - /home/user/repos
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("Load() should return error when working_dir is not under allowed_paths")
+	}
+}
+
+func TestLoad_AllowedPathsValid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	// Use a directory that exists under temp
+	content := fmt.Sprintf(`
+repos:
+  test-repo:
+    provider: discord
+    channel_id: "123456"
+    llm: claude
+    working_dir: %s
+defaults:
+  allowed_paths:
+    - %s
+`, dir, dir)
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err != nil {
+		t.Errorf("Load() should succeed when working_dir is under allowed_paths: %v", err)
 	}
 }

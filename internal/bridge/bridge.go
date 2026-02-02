@@ -108,6 +108,8 @@ func (b *Bridge) Start(ctx context.Context) error {
 	// Start idle timeout checker
 	go b.idleTimeoutLoop(ctx)
 
+	go b.updateBotPresence()
+
 	<-ctx.Done()
 	return b.Stop()
 }
@@ -255,6 +257,11 @@ func (b *Bridge) getOrCreateSession(ctx context.Context, repoName string, repo c
 		llmBackend = b.cfg.Defaults.LLM
 	}
 
+	// Validate working directory against allowed paths (defense-in-depth)
+	if err := config.ValidateWorkingDir(repo.WorkingDir, b.cfg.Defaults.GetAllowedPaths()); err != nil {
+		return nil, fmt.Errorf("path validation: %w", err)
+	}
+
 	llmInstance, err := b.llmFactory(llmBackend, repo.WorkingDir, b.cfg.Defaults.GetClaudePath(), b.cfg.Defaults.GetResumeSession())
 	if err != nil {
 		return nil, fmt.Errorf("create llm: %w", err)
@@ -277,6 +284,7 @@ func (b *Bridge) getOrCreateSession(ctx context.Context, repoName string, repo c
 	b.repos[repoName] = session
 
 	go b.readOutput(session, repoName)
+	go b.updateBotPresence()
 
 	slog.Info("started llm session", "repo", repoName, "llm", llmBackend, "dir", repo.WorkingDir)
 	return session, nil
@@ -519,6 +527,38 @@ func (b *Bridge) checkIdleTimeouts(timeout time.Duration) {
 			_ = ch.provider.Send(ch.channelID, fmt.Sprintf("LLM stopped due to idle timeout (%v)", timeout))
 		}
 	}
+
+	if len(toStop) > 0 {
+		go b.updateBotPresence()
+	}
+}
+
+// updateBotPresence updates the Discord bot status with active session count.
+// No-op if Discord is not configured. Errors are logged but never block operations.
+func (b *Bridge) updateBotPresence() {
+	b.mu.Lock()
+	var count int
+	for _, repo := range b.repos {
+		if repo.llm != nil && repo.llm.Running() {
+			count++
+		}
+	}
+	discord, ok := b.providers["discord"]
+	b.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	type presenceUpdater interface {
+		UpdatePresence(sessionCount int) error
+	}
+
+	if pu, ok := discord.(presenceUpdater); ok {
+		if err := pu.UpdatePresence(count); err != nil {
+			slog.Warn("failed to update bot presence", "error", err)
+		}
+	}
 }
 
 func (b *Bridge) repoForChannel(channelID string) string {
@@ -584,6 +624,8 @@ func (b *Bridge) restartLLM(channelID string) string {
 	}
 	delete(b.repos, repoName)
 	b.mu.Unlock()
+
+	go b.updateBotPresence()
 
 	return "LLM stopped. Will restart on next message."
 }

@@ -115,6 +115,24 @@ func (d *Discord) SendFile(channelID string, filename string, content []byte) er
 	return err
 }
 
+// UpdatePresence updates the bot's Discord status to show the session count.
+func (d *Discord) UpdatePresence(sessionCount int) error {
+	d.mu.Lock()
+	session := d.session
+	d.mu.Unlock()
+
+	if session == nil {
+		return fmt.Errorf("discord not connected")
+	}
+
+	status := fmt.Sprintf("Watching %d session", sessionCount)
+	if sessionCount != 1 {
+		status += "s"
+	}
+
+	return session.UpdateGameStatus(0, status)
+}
+
 func (d *Discord) Messages() <-chan Message {
 	return d.messages
 }

@@ -16,6 +16,7 @@ func TestParse_BridgeCommands(t *testing.T) {
 		{"restart", "/restart", "restart", RouteToBridge},
 		{"help", "/help", "help", RouteToBridge},
 		{"select", "/select", "select", RouteToBridge},
+		{"sessions", "/sessions", "sessions", RouteToBridge},
 		{"status with args", "/status repo1", "status", RouteToBridge},
 		{"uppercase normalized", "/STATUS", "status", RouteToBridge},
 	}

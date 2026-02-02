@@ -6,6 +6,9 @@ go_library(
         "claude.go",
         "factory.go",
         "llm.go",
+        "tmux_claude.go",
+        "tmux_executor.go",
+        "tmux_utils.go",
     ],
     importpath = "github.com/anthropics/llm-bridge/internal/llm",
     visibility = ["//:__subpackages__"],
@@ -17,6 +20,9 @@ go_test(
     srcs = [
         "claude_test.go",
         "factory_test.go",
+        "tmux_claude_test.go",
+        "tmux_executor_mock_test.go",
+        "tmux_utils_test.go",
     ],
     embed = [":llm"],
 )

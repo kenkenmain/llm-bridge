@@ -128,3 +128,36 @@ func TestDiscord_MessageWithoutAuthorID(t *testing.T) {
 		t.Error("terminal messages should have empty AuthorID")
 	}
 }
+
+func TestDiscord_UpdatePresence_NotConnected(t *testing.T) {
+	d := &Discord{}
+	err := d.UpdatePresence(0)
+	if err == nil {
+		t.Error("UpdatePresence should return error when not connected")
+	}
+}
+
+func TestDiscord_UpdatePresence_StatusFormat(t *testing.T) {
+	tests := []struct {
+		name  string
+		count int
+		want  string
+	}{
+		{"zero sessions", 0, "Watching 0 sessions"},
+		{"one session singular", 1, "Watching 1 session"},
+		{"multiple sessions plural", 3, "Watching 3 sessions"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// We can't easily test the actual Discord API call without a mock session,
+			// but we can verify that UpdatePresence doesn't panic with a nil session
+			// and returns an appropriate error
+			d := &Discord{}
+			err := d.UpdatePresence(tt.count)
+			if err == nil {
+				t.Error("expected error with nil session")
+			}
+		})
+	}
+}

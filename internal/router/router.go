@@ -19,11 +19,12 @@ type Route struct {
 }
 
 var BridgeCommands = map[string]bool{
-	"status":  true,
-	"cancel":  true,
-	"restart": true,
-	"help":    true,
-	"select":  true,
+	"status":   true,
+	"cancel":   true,
+	"restart":  true,
+	"help":     true,
+	"select":   true,
+	"sessions": true,
 }
 
 func Parse(content string) Route {

@@ -1712,3 +1712,135 @@ func TestBridge_IsRateLimited_NilLimiters(t *testing.T) {
 		t.Error("nil limiters should not rate limit")
 	}
 }
+
+// mockPresenceProvider implements provider.Provider and presenceUpdater for testing
+type mockPresenceProvider struct {
+	*provider.MockProvider
+	presenceCount int
+	presenceCalls int
+	presenceErr   error
+}
+
+func newMockPresenceProvider(name string) *mockPresenceProvider {
+	return &mockPresenceProvider{
+		MockProvider: provider.NewMockProvider(name),
+	}
+}
+
+func (m *mockPresenceProvider) UpdatePresence(count int) error {
+	m.presenceCount = count
+	m.presenceCalls++
+	return m.presenceErr
+}
+
+func TestBridge_UpdateBotPresence_NoDiscord(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+	// No discord provider registered - should not panic
+	b.updateBotPresence()
+}
+
+func TestBridge_UpdateBotPresence_WithDiscord(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockPres := newMockPresenceProvider("discord")
+	b.providers["discord"] = mockPres
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	b.repos["test-repo"] = &repoSession{
+		name: "test-repo",
+		llm:  mockLLM,
+	}
+
+	b.updateBotPresence()
+
+	if mockPres.presenceCalls != 1 {
+		t.Errorf("expected 1 presence call, got %d", mockPres.presenceCalls)
+	}
+	if mockPres.presenceCount != 1 {
+		t.Errorf("expected count 1, got %d", mockPres.presenceCount)
+	}
+}
+
+func TestBridge_UpdateBotPresence_NoSessions(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockPres := newMockPresenceProvider("discord")
+	b.providers["discord"] = mockPres
+
+	b.updateBotPresence()
+
+	if mockPres.presenceCalls != 1 {
+		t.Errorf("expected 1 presence call, got %d", mockPres.presenceCalls)
+	}
+	if mockPres.presenceCount != 0 {
+		t.Errorf("expected count 0, got %d", mockPres.presenceCount)
+	}
+}
+
+func TestBridge_UpdateBotPresence_Error(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockPres := newMockPresenceProvider("discord")
+	mockPres.presenceErr = fmt.Errorf("discord API error")
+	b.providers["discord"] = mockPres
+
+	// Should not panic even when UpdatePresence returns error
+	b.updateBotPresence()
+}
+
+func TestBridge_UpdateBotPresence_MultipleSessions(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockPres := newMockPresenceProvider("discord")
+	b.providers["discord"] = mockPres
+
+	// Add two running sessions
+	mockLLM1 := newMockLLM("claude")
+	mockLLM1.setRunning(true)
+	b.repos["repo-1"] = &repoSession{
+		name: "repo-1",
+		llm:  mockLLM1,
+	}
+
+	mockLLM2 := newMockLLM("claude")
+	mockLLM2.setRunning(true)
+	b.repos["repo-2"] = &repoSession{
+		name: "repo-2",
+		llm:  mockLLM2,
+	}
+
+	// Add one stopped session - should not be counted
+	mockLLM3 := newMockLLM("claude")
+	mockLLM3.setRunning(false)
+	b.repos["repo-3"] = &repoSession{
+		name: "repo-3",
+		llm:  mockLLM3,
+	}
+
+	b.updateBotPresence()
+
+	if mockPres.presenceCalls != 1 {
+		t.Errorf("expected 1 presence call, got %d", mockPres.presenceCalls)
+	}
+	if mockPres.presenceCount != 2 {
+		t.Errorf("expected count 2 (only running sessions), got %d", mockPres.presenceCount)
+	}
+}
+
+func TestBridge_UpdateBotPresence_NonPresenceProvider(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	// Register a plain MockProvider as "discord" - it does not implement UpdatePresence
+	mockProv := provider.NewMockProvider("discord")
+	b.providers["discord"] = mockProv
+
+	// Should not panic even though provider does not implement presenceUpdater
+	b.updateBotPresence()
+}
