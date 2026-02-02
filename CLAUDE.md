@@ -85,6 +85,7 @@ npm install -g @anthropic-ai/claude-code
 
 # Build and run
 bazel build //cmd/llm-bridge
+# See docs/discord-setup.md for creating a Discord bot and obtaining this token
 export DISCORD_BOT_TOKEN=your_token
 export ANTHROPIC_API_KEY=your_key   # required by Claude CLI
 ./bazel-bin/cmd/llm-bridge/llm-bridge_/llm-bridge serve --config llm-bridge.yaml
@@ -137,7 +138,7 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 - `internal/bridge/` - Core bridge logic, input merging, output broadcasting
 - `internal/config/` - YAML config parsing
 - `internal/llm/` - LLM interface, Claude wrapper (PTY-based)
-- `internal/provider/` - Discord/Terminal providers
+- `internal/provider/` - Discord/Terminal providers (Discord requires specific Gateway Intents and bot permissions — see `docs/discord-setup.md`)
 - `internal/ratelimit/` - Per-user and per-channel rate limiting
 - `internal/router/` - Command routing (/, ::)
 - `internal/output/` - Output handling, file attachments
@@ -150,6 +151,7 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 - `llm-bridge.yaml.example` was removed; see `internal/config/` tests for config structure
 - Bazel builds are fully hermetic (Go SDK downloaded automatically) — only Bazelisk + Node.js needed on host
 - Docker solves deployment packaging, not build reproducibility (Bazel already handles that)
+- Discord bot requires **Message Content Intent** (privileged) enabled in the Developer Portal — without it, the bot receives empty messages. See `docs/discord-setup.md`
 
 ## TODO
 
