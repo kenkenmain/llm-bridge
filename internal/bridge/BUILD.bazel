@@ -10,6 +10,7 @@ go_library(
     visibility = ["//:__subpackages__"],
     deps = [
         "//internal/config",
+        "//internal/git",
         "//internal/llm",
         "//internal/output",
         "//internal/provider",
@@ -28,6 +29,7 @@ go_test(
     embed = [":bridge"],
     deps = [
         "//internal/config",
+        "//internal/git",
         "//internal/llm",
         "//internal/provider",
         "//internal/router",

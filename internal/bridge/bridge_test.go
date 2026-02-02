@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthropics/llm-bridge/internal/config"
+	"github.com/anthropics/llm-bridge/internal/git"
 	"github.com/anthropics/llm-bridge/internal/llm"
 	"github.com/anthropics/llm-bridge/internal/provider"
 	"github.com/anthropics/llm-bridge/internal/router"
@@ -1710,5 +1711,371 @@ func TestBridge_IsRateLimited_NilLimiters(t *testing.T) {
 	// With nil limiters, should always return false
 	if b.isRateLimited(mockProv, msg) {
 		t.Error("nil limiters should not rate limit")
+	}
+}
+
+func TestBridge_GetStatus_RunningWithGitInfo(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+
+	b.repos["test-repo"] = &repoSession{
+		name: "test-repo",
+		llm:  mockLLM,
+		gitInfo: &git.RepoInfo{
+			Branch:     "main",
+			IsWorktree: false,
+		},
+	}
+
+	status := b.getStatus("channel-123")
+	if !strings.Contains(status, "claude running") {
+		t.Errorf("expected running status, got %q", status)
+	}
+	if !strings.Contains(status, "branch: main") {
+		t.Errorf("expected branch in status, got %q", status)
+	}
+	if strings.Contains(status, "worktree") {
+		t.Errorf("should not contain 'worktree' for non-worktree repo, got %q", status)
+	}
+}
+
+func TestBridge_GetStatus_RunningWithWorktreeGitInfo(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+
+	b.repos["test-repo"] = &repoSession{
+		name: "test-repo",
+		llm:  mockLLM,
+		gitInfo: &git.RepoInfo{
+			Branch:     "feature/test",
+			IsWorktree: true,
+		},
+	}
+
+	status := b.getStatus("channel-123")
+	if !strings.Contains(status, "claude running") {
+		t.Errorf("expected running status, got %q", status)
+	}
+	if !strings.Contains(status, "branch: feature/test") {
+		t.Errorf("expected branch in status, got %q", status)
+	}
+	if !strings.Contains(status, "worktree") {
+		t.Errorf("expected 'worktree' in status for worktree repo, got %q", status)
+	}
+}
+
+func TestBridge_GetStatus_RunningWithoutGitInfo(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+
+	b.repos["test-repo"] = &repoSession{
+		name:    "test-repo",
+		llm:     mockLLM,
+		gitInfo: nil,
+	}
+
+	status := b.getStatus("channel-123")
+	if !strings.Contains(status, "claude running") {
+		t.Errorf("expected running status, got %q", status)
+	}
+	if !strings.Contains(status, "test-repo") {
+		t.Errorf("expected repo name in status, got %q", status)
+	}
+	if strings.Contains(status, "branch:") {
+		t.Errorf("should not contain branch info when gitInfo is nil, got %q", status)
+	}
+}
+
+func TestBridge_GetOrCreateSession_DetectsGit(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+		return mockLLM, nil
+	}
+
+	detectedDir := ""
+	b.gitDetector = func(dir string) (*git.RepoInfo, error) {
+		detectedDir = dir
+		return &git.RepoInfo{
+			Branch:     "main",
+			IsWorktree: false,
+			Worktrees: []git.WorktreeInfo{
+				{Path: "/tmp/test", Branch: "main", IsMain: true},
+			},
+		}, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	repo := cfg.Repos["test-repo"]
+
+	session, err := b.getOrCreateSession(context.Background(), "test-repo", repo, mockProv)
+	if err != nil {
+		t.Fatalf("getOrCreateSession error = %v", err)
+	}
+
+	if detectedDir != "/tmp/test" {
+		t.Errorf("gitDetector called with dir = %q, want %q", detectedDir, "/tmp/test")
+	}
+
+	if session.gitInfo == nil {
+		t.Fatal("session.gitInfo should not be nil")
+	}
+	if session.gitInfo.Branch != "main" {
+		t.Errorf("session.gitInfo.Branch = %q, want %q", session.gitInfo.Branch, "main")
+	}
+}
+
+func TestBridge_GetOrCreateSession_GitDetectionFailure(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+		return mockLLM, nil
+	}
+
+	b.gitDetector = func(dir string) (*git.RepoInfo, error) {
+		return nil, fmt.Errorf("not a git repository")
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	repo := cfg.Repos["test-repo"]
+
+	session, err := b.getOrCreateSession(context.Background(), "test-repo", repo, mockProv)
+	if err != nil {
+		t.Fatalf("getOrCreateSession should succeed even if git detection fails, got error = %v", err)
+	}
+
+	if session.gitInfo != nil {
+		t.Errorf("session.gitInfo should be nil when git detection fails, got %+v", session.gitInfo)
+	}
+
+	if session.name != "test-repo" {
+		t.Errorf("session.name = %q, want %q", session.name, "test-repo")
+	}
+}
+
+func TestBridge_HandleBridgeCommand_Worktrees_NoRepo(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockProv := provider.NewMockProvider("discord")
+
+	route := router.Route{
+		Type:    router.RouteToBridge,
+		Command: "worktrees",
+	}
+
+	b.handleBridgeCommand(mockProv, "unknown-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "No repo configured") {
+		t.Errorf("expected 'No repo configured' in response, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_ListWorktrees_WithWorktrees(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/tmp/test", Branch: "main", IsMain: true},
+			{Path: "/tmp/test-feature", Branch: "feature/foo"},
+		}, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "worktrees"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Worktrees for") {
+		t.Errorf("expected worktree listing header, got %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "main") {
+		t.Errorf("expected main branch in output, got %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "feature/foo") {
+		t.Errorf("expected feature branch in output, got %q", msgs[0].Content)
+	}
+	// Current worktree should be marked with *
+	if !strings.Contains(msgs[0].Content, "* ") {
+		t.Errorf("expected current worktree marker, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_ListWorktrees_GitError(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
+		return nil, fmt.Errorf("not a git repository")
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "worktrees"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "git error") {
+		t.Errorf("expected git error message, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_ListWorktrees_NoLinkedWorktrees(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/tmp/test", Branch: "main", IsMain: true},
+		}, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "worktrees"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "No linked worktrees") {
+		t.Errorf("expected no linked worktrees message, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_ListWorktrees_WithConfiguredRepo(t *testing.T) {
+	cfg := testConfig()
+	// Add a worktree repo with matching path
+	cfg.Repos["test-repo/feature"] = config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-789",
+		LLM:        "claude",
+		WorkingDir: "/tmp/test-feature",
+	}
+	b := New(cfg)
+
+	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/tmp/test", Branch: "main", IsMain: true},
+			{Path: "/tmp/test-feature", Branch: "feature/foo"},
+		}, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "worktrees"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "repo: test-repo/feature") {
+		t.Errorf("expected configured repo name in output, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_ListWorktrees_WithActiveSession(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos["test-repo/feature"] = config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-789",
+		LLM:        "claude",
+		WorkingDir: "/tmp/test-feature",
+	}
+	b := New(cfg)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	b.repos["test-repo/feature"] = &repoSession{
+		name: "test-repo/feature",
+		llm:  mockLLM,
+	}
+
+	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/tmp/test", Branch: "main", IsMain: true},
+			{Path: "/tmp/test-feature", Branch: "feature/foo"},
+		}, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "worktrees"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "[active]") {
+		t.Errorf("expected [active] marker for running session, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_ListWorktrees_UnconfiguredWorktree(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/tmp/test", Branch: "main", IsMain: true},
+			{Path: "/tmp/unmanaged", Branch: "experiment"},
+		}, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "worktrees"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "not configured") {
+		t.Errorf("expected 'not configured' for unmanaged worktree, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_HandleBridgeCommand_Help_IncludesWorktrees(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	mockProv := provider.NewMockProvider("discord")
+
+	route := router.Route{
+		Type:    router.RouteToBridge,
+		Command: "help",
+	}
+
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "/worktrees") {
+		t.Errorf("expected '/worktrees' in help output, got %q", msgs[0].Content)
 	}
 }

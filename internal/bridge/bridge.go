@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/anthropics/llm-bridge/internal/config"
+	"github.com/anthropics/llm-bridge/internal/git"
 	"github.com/anthropics/llm-bridge/internal/llm"
 	"github.com/anthropics/llm-bridge/internal/output"
 	"github.com/anthropics/llm-bridge/internal/provider"
@@ -25,6 +27,12 @@ type DiscordFactory func(token string, channelIDs []string) provider.Provider
 // TerminalFactory creates Terminal provider instances. Defaults to provider.NewTerminal.
 type TerminalFactory func(channelID string) *provider.Terminal
 
+// GitDetector detects git repository info for a directory.
+type GitDetector func(dir string) (*git.RepoInfo, error)
+
+// WorktreeLister lists git worktrees for a directory.
+type WorktreeLister func(dir string) ([]git.WorktreeInfo, error)
+
 type Bridge struct {
 	cfg             *config.Config
 	providers       map[string]provider.Provider
@@ -33,6 +41,8 @@ type Bridge struct {
 	discordFactory  DiscordFactory
 	terminalFactory TerminalFactory
 	llmFactory      LLMFactory
+	gitDetector     GitDetector
+	worktreeLister  WorktreeLister
 
 	userLimiter    *ratelimit.Limiter
 	channelLimiter *ratelimit.Limiter
@@ -46,7 +56,8 @@ type repoSession struct {
 	llm       llm.LLM
 	channels  []channelRef
 	cancelCtx context.CancelFunc
-	merger    *Merger // per-repo conflict detection
+	merger    *Merger        // per-repo conflict detection
+	gitInfo   *git.RepoInfo  // nil if not a git repo
 }
 
 type channelRef struct {
@@ -65,6 +76,8 @@ func New(cfg *config.Config) *Bridge {
 			return provider.NewDiscord(token, channelIDs)
 		},
 		terminalFactory: provider.NewTerminal,
+		gitDetector:     git.DetectRepo,
+		worktreeLister:  git.ListWorktrees,
 	}
 
 	if cfg.Defaults.RateLimit.GetRateLimitEnabled() {
@@ -204,8 +217,10 @@ func (b *Bridge) handleBridgeCommand(prov provider.Provider, channelID string, r
 		response = b.cancelLLM(channelID)
 	case "restart":
 		response = b.restartLLM(channelID)
+	case "worktrees":
+		response = b.listWorktrees(channelID)
 	case "help":
-		response = "Commands: /status, /cancel, /restart, /help, /select <repo>\nSkills: ::commit, ::review-pr, etc."
+		response = "Commands: /status, /cancel, /restart, /help, /select <repo>, /worktrees\nSkills: ::commit, ::review-pr, etc."
 	default:
 		response = fmt.Sprintf("Unknown command: %s", route.Command)
 	}
@@ -267,12 +282,23 @@ func (b *Bridge) getOrCreateSession(ctx context.Context, repoName string, repo c
 		return nil, fmt.Errorf("start llm: %w", err)
 	}
 
+	var gitInfo *git.RepoInfo
+	if b.gitDetector != nil {
+		info, err := b.gitDetector(repo.WorkingDir)
+		if err != nil {
+			slog.Warn("git detection failed", "repo", repoName, "dir", repo.WorkingDir, "error", err)
+		} else {
+			gitInfo = info
+		}
+	}
+
 	session := &repoSession{
 		name:      repoName,
 		llm:       llmInstance,
 		channels:  []channelRef{{provider: prov, channelID: repo.ChannelID}},
 		cancelCtx: cancel,
 		merger:    NewMerger(2 * time.Second),
+		gitInfo:   gitInfo,
 	}
 	b.repos[repoName] = session
 
@@ -545,6 +571,12 @@ func (b *Bridge) getStatus(channelID string) string {
 	}
 
 	idle := time.Since(session.llm.LastActivity())
+	if session.gitInfo != nil && session.gitInfo.Branch != "" {
+		if session.gitInfo.IsWorktree {
+			return fmt.Sprintf("LLM: %s running (repo: %s, branch: %s, worktree, idle: %v)", session.llm.Name(), repoName, session.gitInfo.Branch, idle.Round(time.Second))
+		}
+		return fmt.Sprintf("LLM: %s running (repo: %s, branch: %s, idle: %v)", session.llm.Name(), repoName, session.gitInfo.Branch, idle.Round(time.Second))
+	}
 	return fmt.Sprintf("LLM: %s running (repo: %s, idle: %v)", session.llm.Name(), repoName, idle.Round(time.Second))
 }
 
@@ -586,4 +618,59 @@ func (b *Bridge) restartLLM(channelID string) string {
 	b.mu.Unlock()
 
 	return "LLM stopped. Will restart on next message."
+}
+
+func (b *Bridge) listWorktrees(channelID string) string {
+	repoName := b.repoForChannel(channelID)
+	if repoName == "" {
+		return "No repo configured for this channel"
+	}
+
+	repo := b.cfg.Repos[repoName]
+
+	worktrees, err := b.worktreeLister(repo.WorkingDir)
+	if err != nil {
+		return fmt.Sprintf("Not a git repository or git error: %v", err)
+	}
+
+	if len(worktrees) <= 1 {
+		return fmt.Sprintf("No linked worktrees for %s", repoName)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Worktrees for %s:\n", repoName))
+	for _, wt := range worktrees {
+		marker := "  "
+		if wt.Path == repo.WorkingDir {
+			marker = "* "
+		}
+
+		// Check if this worktree has a configured repo
+		configuredRepo := ""
+		for name, r := range b.cfg.Repos {
+			if r.WorkingDir == wt.Path {
+				configuredRepo = name
+				break
+			}
+		}
+
+		line := fmt.Sprintf("  %s%s (%s)", marker, wt.Path, wt.Branch)
+		if configuredRepo != "" {
+			// Check if session exists
+			b.mu.Lock()
+			session, active := b.repos[configuredRepo]
+			isActive := active && session.llm != nil && session.llm.Running()
+			b.mu.Unlock()
+
+			if isActive {
+				line += fmt.Sprintf(" -> repo: %s [active]", configuredRepo)
+			} else {
+				line += fmt.Sprintf(" -> repo: %s", configuredRepo)
+			}
+		} else {
+			line += " -> not configured"
+		}
+		sb.WriteString(line + "\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }

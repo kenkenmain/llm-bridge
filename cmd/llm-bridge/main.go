@@ -60,6 +60,8 @@ var addRepoCmd = &cobra.Command{
 		channelFlag, _ := cmd.Flags().GetString("channel")
 		llmFlag, _ := cmd.Flags().GetString("llm")
 		dirFlag, _ := cmd.Flags().GetString("dir")
+		gitRootFlag, _ := cmd.Flags().GetString("git-root")
+		branchFlag, _ := cmd.Flags().GetString("branch")
 
 		cfg, err := config.Load(cfgFile)
 		if err != nil {
@@ -73,6 +75,8 @@ var addRepoCmd = &cobra.Command{
 			ChannelID:  channelFlag,
 			LLM:        llmFlag,
 			WorkingDir: dirFlag,
+			GitRoot:    gitRootFlag,
+			Branch:     branchFlag,
 		}
 
 		data, err := yaml.Marshal(cfg)
@@ -99,6 +103,8 @@ func init() {
 	addRepoCmd.Flags().String("channel", "", "Channel ID")
 	addRepoCmd.Flags().String("llm", "claude", "LLM backend (claude, codex)")
 	addRepoCmd.Flags().String("dir", ".", "Working directory")
+	addRepoCmd.Flags().String("git-root", "", "Git root directory (for worktree repos)")
+	addRepoCmd.Flags().String("branch", "", "Branch name (informational)")
 	_ = addRepoCmd.MarkFlagRequired("channel")
 	_ = addRepoCmd.MarkFlagRequired("dir")
 }
