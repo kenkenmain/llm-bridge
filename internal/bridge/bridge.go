@@ -96,10 +96,11 @@ func New(cfg *config.Config) *Bridge {
 
 func (b *Bridge) Start(ctx context.Context) error {
 	// Initialize Discord if configured
-	if b.cfg.Providers.Discord.BotToken != "" {
+	token := b.cfg.Providers.Discord.GetBotToken()
+	if token != "" {
 		channelIDs := b.channelIDsForProvider("discord")
 		if len(channelIDs) > 0 {
-			discord := b.discordFactory(b.cfg.Providers.Discord.BotToken, channelIDs)
+			discord := b.discordFactory(token, channelIDs)
 			if err := discord.Start(ctx); err != nil {
 				return fmt.Errorf("start discord: %w", err)
 			}

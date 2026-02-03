@@ -200,6 +200,167 @@ func TestDefaults_GetIdleTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestDiscordConfig_GetBotToken(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{"empty returns empty", "", ""},
+		{"custom value", "custom-token", "custom-token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := DiscordConfig{BotToken: tt.token}
+			if got := d.GetBotToken(); got != tt.want {
+				t.Errorf("GetBotToken() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscordConfig_GetApplicationID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"empty returns default", "", DefaultDiscordApplicationID},
+		{"custom value", "999", "999"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := DiscordConfig{ApplicationID: tt.id}
+			if got := d.GetApplicationID(); got != tt.want {
+				t.Errorf("GetApplicationID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscordConfig_GetPublicKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{"empty returns default", "", DefaultDiscordPublicKey},
+		{"custom value", "abc123", "abc123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := DiscordConfig{PublicKey: tt.key}
+			if got := d.GetPublicKey(); got != tt.want {
+				t.Errorf("GetPublicKey() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscordConfig_GetTestChannelID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"empty returns default", "", DefaultDiscordTestChannelID},
+		{"custom value", "888", "888"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := DiscordConfig{TestChannelID: tt.id}
+			if got := d.GetTestChannelID(); got != tt.want {
+				t.Errorf("GetTestChannelID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscordConfig_DefaultConstants(t *testing.T) {
+	if DefaultDiscordApplicationID != "1468294340190408764" {
+		t.Errorf("DefaultDiscordApplicationID = %q", DefaultDiscordApplicationID)
+	}
+	if DefaultDiscordPublicKey != "514e7d7f6bcc0907e4207ede9b77d6c789609df45727be9437e2bade64fb8147" {
+		t.Errorf("DefaultDiscordPublicKey = %q", DefaultDiscordPublicKey)
+	}
+	if DefaultDiscordTestChannelID != "1468297189879975998" {
+		t.Errorf("DefaultDiscordTestChannelID = %q", DefaultDiscordTestChannelID)
+	}
+}
+
+func TestDiscordConfig_BotTokenNoDefault(t *testing.T) {
+	d := DiscordConfig{}
+	if got := d.GetBotToken(); got != "" {
+		t.Errorf("GetBotToken() on empty config = %q, want empty (token must come from config/env)", got)
+	}
+}
+
+func TestDiscordConfig_YAMLOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+providers:
+  discord:
+    bot_token: override-token
+    application_id: "999"
+    public_key: override-key
+    test_channel_id: "777"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := cfg.Providers.Discord.GetBotToken(); got != "override-token" {
+		t.Errorf("GetBotToken() = %q, want %q", got, "override-token")
+	}
+	if got := cfg.Providers.Discord.GetApplicationID(); got != "999" {
+		t.Errorf("GetApplicationID() = %q, want %q", got, "999")
+	}
+	if got := cfg.Providers.Discord.GetPublicKey(); got != "override-key" {
+		t.Errorf("GetPublicKey() = %q, want %q", got, "override-key")
+	}
+	if got := cfg.Providers.Discord.GetTestChannelID(); got != "777" {
+		t.Errorf("GetTestChannelID() = %q, want %q", got, "777")
+	}
+}
+
+func TestDiscordConfig_MinimalConfigUsesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := cfg.Providers.Discord.GetBotToken(); got != "" {
+		t.Errorf("GetBotToken() = %q, want empty (no default token)", got)
+	}
+	if got := cfg.Providers.Discord.GetApplicationID(); got != DefaultDiscordApplicationID {
+		t.Errorf("GetApplicationID() = %q, want default", got)
+	}
+	if got := cfg.Providers.Discord.GetPublicKey(); got != DefaultDiscordPublicKey {
+		t.Errorf("GetPublicKey() = %q, want default", got)
+	}
+	if got := cfg.Providers.Discord.GetTestChannelID(); got != DefaultDiscordTestChannelID {
+		t.Errorf("GetTestChannelID() = %q, want default", got)
+	}
+}
+
 func TestDefaultPath(t *testing.T) {
 	got := DefaultPath()
 	if got != "llm-bridge.yaml" {

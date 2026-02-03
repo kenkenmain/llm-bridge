@@ -1,4 +1,4 @@
-.PHONY: build test lint coverage gazelle image docker clean run stop
+.PHONY: build test lint coverage gazelle image docker clean run stop integration
 
 BAZEL=bazel
 
@@ -14,6 +14,9 @@ lint:
 coverage:
 	$(BAZEL) coverage //internal/...
 	./scripts/check-coverage.sh
+
+integration:
+	$(BAZEL) test //internal/provider:discord_integration_test --config=integration
 
 gazelle:
 	$(BAZEL) run //:gazelle

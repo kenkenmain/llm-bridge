@@ -51,26 +51,42 @@ bazel test //:lint              # run golangci-lint
 bazel run //:gazelle            # after changing imports or adding files
 ```
 
+## Integration Tests
+
+```bash
+make integration   # run Discord integration tests
+bazel test //internal/provider:discord_integration_test --config=integration  # explicit target
+```
+
+Integration tests require network access and a valid Discord bot token. Default credentials are hardcoded in `internal/config/config.go` for this internal project. Override via environment variables:
+
+- `DISCORD_BOT_TOKEN` — override default bot token
+- `DISCORD_TEST_CHANNEL_ID` — override default test channel
+
+Integration tests are tagged `manual` so `bazel test //...` skips them automatically.
+
 ## Make (shortcuts)
 
 The Makefile wraps Bazel commands for convenience:
 
 ```bash
-make build     # bazel build //cmd/llm-bridge
-make test      # bazel test //...
-make lint      # bazel test //:lint
-make coverage  # bazel coverage //... + threshold check (90%)
-make gazelle   # bazel run //:gazelle
-make docker    # full Docker build (base + prod image)
-make image     # Bazel OCI image build + load
+make build        # bazel build //cmd/llm-bridge
+make test         # bazel test //...
+make lint         # bazel test //:lint
+make coverage     # bazel coverage //... + threshold check (90%)
+make integration  # run Discord integration tests
+make gazelle      # bazel run //:gazelle
+make docker       # full Docker build (base + prod image)
+make image        # Bazel OCI image build + load
 ```
 
 ## Bazel Configs
 
 ```bash
-bazel test //... --config=ci     # CI caching + verbose output
-bazel build //... --config=race  # Go race detector
-bazel coverage //...             # uses --combined_report=lcov and --instrumentation_filter=//internal/ from .bazelrc
+bazel test //... --config=ci          # CI caching + verbose output
+bazel build //... --config=race       # Go race detector
+bazel test //... --config=integration # run integration tests (requires network + credentials)
+bazel coverage //...                  # uses --combined_report=lcov and --instrumentation_filter=//internal/ from .bazelrc
 ```
 
 ## Run
