@@ -3,6 +3,8 @@ coverage.out
 cov.out
 .agents/
 docs/plans/
+.env.local
+.env
 
 # Bazel
 bazel-bin

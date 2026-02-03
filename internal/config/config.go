@@ -122,7 +122,41 @@ type ProviderConfigs struct {
 }
 
 type DiscordConfig struct {
-	BotToken string `yaml:"bot_token"`
+	BotToken      string `yaml:"bot_token"`
+	ApplicationID string `yaml:"application_id"`
+	PublicKey      string `yaml:"public_key"`
+	TestChannelID string `yaml:"test_channel_id"`
+}
+
+const (
+	DefaultDiscordApplicationID = "1468294340190408764"
+	DefaultDiscordPublicKey     = "514e7d7f6bcc0907e4207ede9b77d6c789609df45727be9437e2bade64fb8147"
+	DefaultDiscordTestChannelID = "1468297189879975998"
+)
+
+func (d DiscordConfig) GetBotToken() string {
+	return d.BotToken
+}
+
+func (d DiscordConfig) GetApplicationID() string {
+	if d.ApplicationID == "" {
+		return DefaultDiscordApplicationID
+	}
+	return d.ApplicationID
+}
+
+func (d DiscordConfig) GetPublicKey() string {
+	if d.PublicKey == "" {
+		return DefaultDiscordPublicKey
+	}
+	return d.PublicKey
+}
+
+func (d DiscordConfig) GetTestChannelID() string {
+	if d.TestChannelID == "" {
+		return DefaultDiscordTestChannelID
+	}
+	return d.TestChannelID
 }
 
 // Validate checks the config for consistency errors.

@@ -1120,6 +1120,27 @@ func TestBridge_Start_WithDiscord(t *testing.T) {
 	}
 }
 
+func TestBridge_Start_NoTokenSkipsDiscord(t *testing.T) {
+	cfg := testConfig()
+	// BotToken empty, no default — Discord should not start
+
+	discordFactoryCalled := false
+	b := New(cfg)
+	b.discordFactory = func(token string, channelIDs []string) provider.Provider {
+		discordFactoryCalled = true
+		return provider.NewMockProvider("discord")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_ = b.Start(ctx)
+
+	if discordFactoryCalled {
+		t.Error("discord factory should not be called when token is empty")
+	}
+}
+
 func TestBridge_Start_DiscordError(t *testing.T) {
 	cfg := testConfig()
 	cfg.Providers.Discord.BotToken = "test-token"

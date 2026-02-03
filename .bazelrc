@@ -15,6 +15,11 @@ build:ci --repository_cache=~/.cache/bazel-repo
 build:ci --disk_cache=~/.cache/bazel-disk
 test:ci --test_output=all
 
+# Integration tests (run manually, require network + credentials)
+test:integration --test_tag_filters=integration
+test:integration --test_env=DISCORD_BOT_TOKEN
+test:integration --test_env=DISCORD_TEST_CHANNEL_ID
+
 # Coverage config
 coverage --combined_report=lcov
 coverage --instrumentation_filter=//internal/
