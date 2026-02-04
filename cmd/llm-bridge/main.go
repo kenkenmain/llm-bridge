@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
 	"github.com/anthropics/llm-bridge/internal/bridge"
 	"github.com/anthropics/llm-bridge/internal/config"
@@ -63,14 +62,7 @@ var addRepoCmd = &cobra.Command{
 		gitRootFlag, _ := cmd.Flags().GetString("git-root")
 		branchFlag, _ := cmd.Flags().GetString("branch")
 
-		cfg, err := config.Load(cfgFile)
-		if err != nil {
-			cfg = &config.Config{
-				Repos: make(map[string]config.RepoConfig),
-			}
-		}
-
-		cfg.Repos[name] = config.RepoConfig{
+		repo := config.RepoConfig{
 			Provider:   providerFlag,
 			ChannelID:  channelFlag,
 			LLM:        llmFlag,
@@ -79,13 +71,8 @@ var addRepoCmd = &cobra.Command{
 			Branch:     branchFlag,
 		}
 
-		data, err := yaml.Marshal(cfg)
-		if err != nil {
-			return fmt.Errorf("marshal config: %w", err)
-		}
-
-		if err := os.WriteFile(cfgFile, data, 0600); err != nil {
-			return fmt.Errorf("write config: %w", err)
+		if err := config.AddRepo(cfgFile, name, repo); err != nil {
+			return err
 		}
 
 		fmt.Printf("Added repo %q to %s\n", name, cfgFile)

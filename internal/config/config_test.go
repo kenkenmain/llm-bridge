@@ -802,3 +802,131 @@ repos:
 		t.Errorf("len(Repos) = %d, want 3", len(cfg.Repos))
 	}
 }
+
+func TestConfig_Validate_DuplicateChannelID_ParentAndWorktreeChild(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature
+        path: /code/myproject-feature
+        channel_id: "111111"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for duplicate channel_id between parent and worktree child")
+	}
+	if !strings.Contains(err.Error(), "duplicate channel_id") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "duplicate channel_id")
+	}
+}
+
+func TestLoad_WorktreeExpansion_ConflictsWithExistingRepo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: child
+        path: /code/myproject-child
+        channel_id: "222222"
+  myproject/child:
+    provider: discord
+    channel_id: "333333"
+    llm: claude
+    working_dir: /code/other
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for worktree conflicting with existing repo")
+	}
+	if !strings.Contains(err.Error(), "conflicts with existing repo") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "conflicts with existing repo")
+	}
+}
+
+func TestLoad_MultipleRepos_WithWorktrees_UniqueChannelIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  project-a:
+    provider: discord
+    channel_id: "100"
+    llm: claude
+    working_dir: /code/a
+    worktrees:
+      - name: feat-1
+        path: /code/a-feat-1
+        channel_id: "101"
+      - name: feat-2
+        path: /code/a-feat-2
+        channel_id: "102"
+  project-b:
+    provider: discord
+    channel_id: "200"
+    llm: claude
+    working_dir: /code/b
+    worktrees:
+      - name: feat-1
+        path: /code/b-feat-1
+        channel_id: "201"
+      - name: feat-2
+        path: /code/b-feat-2
+        channel_id: "202"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Repos) != 6 {
+		t.Fatalf("len(Repos) = %d, want 6", len(cfg.Repos))
+	}
+
+	// Verify each expanded entry has the correct channel_id.
+	expected := map[string]string{
+		"project-a":        "100",
+		"project-a/feat-1": "101",
+		"project-a/feat-2": "102",
+		"project-b":        "200",
+		"project-b/feat-1": "201",
+		"project-b/feat-2": "202",
+	}
+	for name, wantCh := range expected {
+		repo, ok := cfg.Repos[name]
+		if !ok {
+			t.Errorf("missing repo entry %q", name)
+			continue
+		}
+		if repo.ChannelID != wantCh {
+			t.Errorf("repo %q ChannelID = %q, want %q", name, repo.ChannelID, wantCh)
+		}
+	}
+}

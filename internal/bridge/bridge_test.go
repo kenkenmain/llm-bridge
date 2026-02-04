@@ -2100,3 +2100,158 @@ func TestBridge_HandleBridgeCommand_Help_IncludesWorktrees(t *testing.T) {
 		t.Errorf("expected '/worktrees' in help output, got %q", msgs[0].Content)
 	}
 }
+
+func testConfigWithWorktrees() *config.Config {
+	return &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"myproject": {
+				Provider:   "discord",
+				ChannelID:  "channel-100",
+				LLM:        "claude",
+				WorkingDir: "/tmp/myproject",
+			},
+			"myproject/feature": {
+				Provider:   "discord",
+				ChannelID:  "channel-200",
+				LLM:        "claude",
+				WorkingDir: "/tmp/myproject-feature",
+				GitRoot:    "/tmp/myproject",
+			},
+			"other-repo": {
+				Provider:   "terminal",
+				ChannelID:  "terminal",
+				LLM:        "claude",
+				WorkingDir: "/tmp/other",
+			},
+		},
+		Defaults: config.Defaults{
+			LLM:             "claude",
+			OutputThreshold: 1500,
+			IdleTimeout:     "10m",
+		},
+	}
+}
+
+func TestBridge_ChannelIDsForProvider_WithWorktreeRepos(t *testing.T) {
+	cfg := testConfigWithWorktrees()
+	b := New(cfg)
+
+	discordIDs := b.channelIDsForProvider("discord")
+	if len(discordIDs) != 2 {
+		t.Errorf("expected 2 discord channel IDs, got %d", len(discordIDs))
+	}
+
+	found := make(map[string]bool)
+	for _, id := range discordIDs {
+		found[id] = true
+	}
+	if !found["channel-100"] || !found["channel-200"] {
+		t.Errorf("missing expected discord channel IDs: %v", discordIDs)
+	}
+
+	terminalIDs := b.channelIDsForProvider("terminal")
+	if len(terminalIDs) != 1 {
+		t.Errorf("expected 1 terminal channel ID, got %d", len(terminalIDs))
+	}
+	if len(terminalIDs) == 1 && terminalIDs[0] != "terminal" {
+		t.Errorf("expected terminal channel ID 'terminal', got %q", terminalIDs[0])
+	}
+}
+
+func TestBridge_RepoForChannel_WorktreeChild(t *testing.T) {
+	cfg := testConfigWithWorktrees()
+	b := New(cfg)
+
+	repo := b.repoForChannel("channel-100")
+	if repo != "myproject" {
+		t.Errorf("repoForChannel(channel-100) = %q, want myproject", repo)
+	}
+
+	repo = b.repoForChannel("channel-200")
+	if repo != "myproject/feature" {
+		t.Errorf("repoForChannel(channel-200) = %q, want myproject/feature", repo)
+	}
+
+	repo = b.repoForChannel("unknown")
+	if repo != "" {
+		t.Errorf("repoForChannel(unknown) = %q, want empty string", repo)
+	}
+}
+
+func TestBridge_HandleLLMMessage_WorktreeChildChannel(t *testing.T) {
+	cfg := testConfigWithWorktrees()
+	b := New(cfg)
+
+	var capturedWorkDir string
+	mockLLM := newMockLLM("claude")
+	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+		capturedWorkDir = workDir
+		return mockLLM, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	msg := provider.Message{
+		ChannelID: "channel-200",
+		Content:   "work on feature",
+		Source:    "discord",
+	}
+	route := router.Route{Type: router.RouteToLLM, Raw: "work on feature"}
+
+	b.handleLLMMessage(context.Background(), mockProv, msg, route)
+
+	// Verify session was created for the worktree child repo
+	b.mu.Lock()
+	_, hasWorktreeSession := b.repos["myproject/feature"]
+	_, hasParentSession := b.repos["myproject"]
+	b.mu.Unlock()
+
+	if !hasWorktreeSession {
+		t.Errorf("expected session for 'myproject/feature' to be created")
+	}
+	if hasParentSession {
+		t.Errorf("did not expect session for 'myproject' to be created")
+	}
+
+	if capturedWorkDir != "/tmp/myproject-feature" {
+		t.Errorf("llmFactory workDir = %q, want /tmp/myproject-feature", capturedWorkDir)
+	}
+
+	sentMsgs := mockLLM.getSentMessages()
+	if len(sentMsgs) != 1 {
+		t.Fatalf("expected 1 LLM message, got %d", len(sentMsgs))
+	}
+}
+
+func TestBridge_Start_WithDiscord_WorktreeChannels(t *testing.T) {
+	cfg := testConfigWithWorktrees()
+	cfg.Providers.Discord.BotToken = "test-token"
+
+	b := New(cfg)
+
+	var capturedChannelIDs []string
+	mockDiscord := provider.NewMockProvider("discord")
+	b.discordFactory = func(token string, channelIDs []string) provider.Provider {
+		capturedChannelIDs = channelIDs
+		return mockDiscord
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := b.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	if len(capturedChannelIDs) != 2 {
+		t.Fatalf("expected 2 channel IDs passed to discord factory, got %d", len(capturedChannelIDs))
+	}
+
+	found := make(map[string]bool)
+	for _, id := range capturedChannelIDs {
+		found[id] = true
+	}
+	if !found["channel-100"] || !found["channel-200"] {
+		t.Errorf("discord factory missing expected channel IDs: %v", capturedChannelIDs)
+	}
+}

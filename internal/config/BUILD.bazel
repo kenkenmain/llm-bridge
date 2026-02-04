@@ -2,7 +2,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "config",
-    srcs = ["config.go"],
+    srcs = [
+        "addrepo.go",
+        "config.go",
+    ],
     importpath = "github.com/anthropics/llm-bridge/internal/config",
     visibility = ["//:__subpackages__"],
     deps = ["@in_gopkg_yaml_v3//:yaml_v3"],
@@ -10,6 +13,9 @@ go_library(
 
 go_test(
     name = "config_test",
-    srcs = ["config_test.go"],
+    srcs = [
+        "addrepo_test.go",
+        "config_test.go",
+    ],
     embed = [":config"],
 )

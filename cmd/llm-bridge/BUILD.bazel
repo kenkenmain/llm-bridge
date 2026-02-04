@@ -9,7 +9,6 @@ go_library(
         "//internal/bridge",
         "//internal/config",
         "@com_github_spf13_cobra//:cobra",
-        "@in_gopkg_yaml_v3//:yaml_v3",
     ],
 )
 
