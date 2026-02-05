@@ -31,11 +31,7 @@ func testConfig() *config.Config {
 				WorkingDir: "/tmp/other",
 			},
 		},
-		Defaults: config.Defaults{
-			LLM:             "claude",
-			OutputThreshold: 1500,
-			IdleTimeout:     "10m",
-		},
+		Defaults: config.NewDefaults(),
 	}
 }
 
@@ -76,9 +72,9 @@ func TestBridge_ChannelIDsForProvider(t *testing.T) {
 	}
 
 	// Non-existent provider
-	ids = b.channelIDsForProvider("telegram")
+	ids = b.channelIDsForProvider("nonexistent")
 	if len(ids) != 0 {
-		t.Errorf("expected 0 channel IDs for telegram, got %d", len(ids))
+		t.Errorf("expected 0 channel IDs for nonexistent, got %d", len(ids))
 	}
 }
 
@@ -1169,9 +1165,9 @@ func TestBridge_Start_DiscordError(t *testing.T) {
 func TestBridge_Start_NoChannelsForDiscord(t *testing.T) {
 	cfg := testConfig()
 	cfg.Providers.Discord.BotToken = "test-token"
-	// Change all repos to use telegram (not configured)
+	// Change all repos to use a provider that is not configured
 	for name, repo := range cfg.Repos {
-		repo.Provider = "telegram"
+		repo.Provider = "nonexistent"
 		cfg.Repos[name] = repo
 	}
 
@@ -2124,11 +2120,7 @@ func testConfigWithWorktrees() *config.Config {
 				WorkingDir: "/tmp/other",
 			},
 		},
-		Defaults: config.Defaults{
-			LLM:             "claude",
-			OutputThreshold: 1500,
-			IdleTimeout:     "10m",
-		},
+		Defaults: config.NewDefaults(),
 	}
 }
 

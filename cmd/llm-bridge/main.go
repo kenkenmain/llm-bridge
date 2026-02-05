@@ -18,7 +18,7 @@ var cfgFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "llm-bridge",
-	Short: "Bridge Discord/Telegram to Claude",
+	Short: "Bridge Discord to Claude",
 	Long:  "A bidirectional bridge connecting chat platforms to LLM CLIs.",
 }
 
@@ -86,7 +86,7 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(addRepoCmd)
 
-	addRepoCmd.Flags().String("provider", "discord", "Chat provider (discord, telegram)")
+	addRepoCmd.Flags().String("provider", "discord", "Chat provider (discord)")
 	addRepoCmd.Flags().String("channel", "", "Channel ID")
 	addRepoCmd.Flags().String("llm", "claude", "LLM backend")
 	addRepoCmd.Flags().String("dir", ".", "Working directory")

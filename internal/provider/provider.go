@@ -15,7 +15,7 @@ type Message struct {
 
 // Provider defines the interface for chat providers
 type Provider interface {
-	// Name returns the provider name ("discord", "telegram", "terminal")
+	// Name returns the provider name ("discord", "terminal")
 	Name() string
 
 	// Start connects to the chat service

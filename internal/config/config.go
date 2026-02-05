@@ -104,6 +104,8 @@ func (r RateLimitConfig) GetChannelBurst() int {
 	return r.ChannelBurst
 }
 
+// GetClaudePath returns the path to the Claude CLI binary.
+// Defaults to "claude" if not explicitly set.
 func (d Defaults) GetClaudePath() string {
 	if d.ClaudePath == "" {
 		return "claude"
@@ -111,6 +113,8 @@ func (d Defaults) GetClaudePath() string {
 	return d.ClaudePath
 }
 
+// GetResumeSession returns whether LLM sessions should resume on reconnect.
+// Defaults to true if not explicitly set.
 func (d Defaults) GetResumeSession() bool {
 	if d.ResumeSession == nil {
 		return true
@@ -118,6 +122,9 @@ func (d Defaults) GetResumeSession() bool {
 	return *d.ResumeSession
 }
 
+// GetIdleTimeoutDuration returns the idle timeout as a time.Duration.
+// Falls back to 10 minutes if the stored value is unparseable (defensive;
+// loadRaw validates this at load time).
 func (d Defaults) GetIdleTimeoutDuration() time.Duration {
 	dur, err := time.ParseDuration(d.IdleTimeout)
 	if err != nil {
@@ -168,10 +175,11 @@ func (d DiscordConfig) GetTestChannelID() string {
 	return d.TestChannelID
 }
 
-// Validate checks the config for consistency errors.
-// When called by Load(), this runs after worktree expansion so duplicate
-// channel_id detection covers expanded entries. AddRepo() calls it on the
-// raw (unexpanded) form to validate before writing.
+// Validate checks the config for structural integrity and channel_id uniqueness.
+// It covers both top-level repo channel_ids and worktree-level channel_ids.
+// Load() calls this before worktree expansion; worktree name conflicts with
+// existing repos are caught separately during expansion. AddRepo() also calls
+// it on the raw form to validate before writing.
 func (c *Config) Validate() error {
 	// Check worktree field integrity on repos that still carry worktree definitions.
 	for name, repo := range c.Repos {
@@ -249,9 +257,36 @@ func loadRaw(path string) (*Config, error) {
 		cfg.Defaults.IdleTimeout = defaults.IdleTimeout
 	}
 
+	// Validate output_threshold is non-negative.
+	if cfg.Defaults.OutputThreshold < 0 {
+		return nil, fmt.Errorf("invalid output_threshold %d: must be non-negative", cfg.Defaults.OutputThreshold)
+	}
+
+	// Validate idle_timeout is a parseable duration.
+	if _, err := time.ParseDuration(cfg.Defaults.IdleTimeout); err != nil {
+		return nil, fmt.Errorf("invalid idle_timeout %q: %w", cfg.Defaults.IdleTimeout, err)
+	}
+
+	// Validate rate limit values are non-negative.
+	rl := cfg.Defaults.RateLimit
+	if rl.UserRate < 0 {
+		return nil, fmt.Errorf("invalid user_rate %v: must be non-negative", rl.UserRate)
+	}
+	if rl.UserBurst < 0 {
+		return nil, fmt.Errorf("invalid user_burst %d: must be non-negative", rl.UserBurst)
+	}
+	if rl.ChannelRate < 0 {
+		return nil, fmt.Errorf("invalid channel_rate %v: must be non-negative", rl.ChannelRate)
+	}
+	if rl.ChannelBurst < 0 {
+		return nil, fmt.Errorf("invalid channel_burst %d: must be non-negative", rl.ChannelBurst)
+	}
+
 	return &cfg, nil
 }
 
+// Load reads the config from path, applies defaults, validates, and
+// expands worktrees into top-level repo entries.
 func Load(path string) (*Config, error) {
 	cfg, err := loadRaw(path)
 	if err != nil {
@@ -298,6 +333,7 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// DefaultPath returns the default config file path relative to the current directory.
 func DefaultPath() string {
 	return filepath.Join(".", "llm-bridge.yaml")
 }

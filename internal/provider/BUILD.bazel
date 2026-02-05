@@ -35,6 +35,7 @@ go_test(
         "no-sandbox",
     ],
     deps = [
+        "//internal/config:config",
         "@com_github_bwmarrin_discordgo//:discordgo",
     ],
 )

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ repos:
     working_dir: /tmp/test
 
 defaults:
-  llm: codex
+  llm: custom-llm
   output_threshold: 2000
   idle_timeout: 5m
   resume_session: false
@@ -51,8 +52,8 @@ providers:
 		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "123456")
 	}
 
-	if cfg.Defaults.LLM != "codex" {
-		t.Errorf("Defaults.LLM = %q, want %q", cfg.Defaults.LLM, "codex")
+	if cfg.Defaults.LLM != "custom-llm" {
+		t.Errorf("Defaults.LLM = %q, want %q", cfg.Defaults.LLM, "custom-llm")
 	}
 	if cfg.Defaults.OutputThreshold != 2000 {
 		t.Errorf("Defaults.OutputThreshold = %d, want 2000", cfg.Defaults.OutputThreshold)
@@ -123,7 +124,7 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	if err := os.WriteFile(path, []byte("invalid: yaml: content:"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("{{not yaml"), 0600); err != nil {
 		t.Fatalf("write test config: %v", err)
 	}
 
@@ -960,5 +961,112 @@ repos:
 		if repo.ChannelID != wantCh {
 			t.Errorf("repo %q ChannelID = %q, want %q", name, repo.ChannelID, wantCh)
 		}
+	}
+}
+
+func TestLoad_DefaultsMatchNewDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	// Empty config — loadRaw should apply defaults identical to NewDefaults().
+	if err := os.WriteFile(path, []byte("repos: {}\n"), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	want := NewDefaults()
+	if !reflect.DeepEqual(cfg.Defaults, want) {
+		t.Errorf("Defaults = %+v, want %+v", cfg.Defaults, want)
+	}
+}
+
+func TestLoad_InvalidIdleTimeout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+defaults:
+  idle_timeout: "not-a-duration"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for invalid idle_timeout")
+	}
+	if !strings.Contains(err.Error(), "invalid idle_timeout") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "invalid idle_timeout")
+	}
+}
+
+func TestLoad_NegativeOutputThreshold(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := "repos: {}\ndefaults:\n  output_threshold: -1\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for negative output_threshold")
+	}
+	if !strings.Contains(err.Error(), "invalid output_threshold") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "invalid output_threshold")
+	}
+}
+
+func TestLoad_NegativeRateLimitValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "negative user_rate",
+			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    user_rate: -1.0\n",
+			wantErr: "invalid user_rate",
+		},
+		{
+			name: "negative user_burst",
+			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    user_burst: -1\n",
+			wantErr: "invalid user_burst",
+		},
+		{
+			name: "negative channel_rate",
+			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    channel_rate: -0.5\n",
+			wantErr: "invalid channel_rate",
+		},
+		{
+			name: "negative channel_burst",
+			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    channel_burst: -10\n",
+			wantErr: "invalid channel_burst",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("write test config: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil {
+				t.Fatalf("Load() expected error for %s", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
