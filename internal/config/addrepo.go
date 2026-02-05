@@ -13,16 +13,20 @@ import (
 // If the name already exists, it is overwritten.
 // The repo is validated before writing.
 func AddRepo(cfgPath string, name string, repo RepoConfig) error {
-	cfg, err := Load(cfgPath)
+	cfg, err := loadRaw(cfgPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("load config: %w", err)
 		}
 		cfg = &Config{
-			Repos: make(map[string]RepoConfig),
+			Repos:    make(map[string]RepoConfig),
+			Defaults: NewDefaults(),
 		}
 	}
 
+	if cfg.Repos == nil {
+		cfg.Repos = make(map[string]RepoConfig)
+	}
 	cfg.Repos[name] = repo
 
 	if err := cfg.Validate(); err != nil {

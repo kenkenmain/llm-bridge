@@ -41,6 +41,15 @@ type Defaults struct {
 	RateLimit       RateLimitConfig `yaml:"rate_limit"`
 }
 
+// NewDefaults returns the default values for the Defaults struct.
+func NewDefaults() Defaults {
+	return Defaults{
+		LLM:             "claude",
+		OutputThreshold: 1500,
+		IdleTimeout:     "10m",
+	}
+}
+
 // RateLimitConfig holds per-user and per-channel rate limit settings.
 type RateLimitConfig struct {
 	UserRate     float64 `yaml:"user_rate"`     // messages per second per user (default: 0.5 = 1 msg every 2s)
@@ -160,8 +169,9 @@ func (d DiscordConfig) GetTestChannelID() string {
 }
 
 // Validate checks the config for consistency errors.
-// It should be called after worktree expansion, so duplicate channel ID
-// detection operates on the final set of repo entries.
+// When called by Load(), this runs after worktree expansion so duplicate
+// channel_id detection covers expanded entries. AddRepo() calls it on the
+// raw (unexpanded) form to validate before writing.
 func (c *Config) Validate() error {
 	// Check worktree field integrity on repos that still carry worktree definitions.
 	for name, repo := range c.Repos {
@@ -183,7 +193,12 @@ func (c *Config) Validate() error {
 	for name, repo := range c.Repos {
 		if repo.ChannelID != "" {
 			if existing, ok := channelIDs[repo.ChannelID]; ok {
-				return fmt.Errorf("duplicate channel_id %q in repos %q and %q", repo.ChannelID, existing, name)
+				// Sort names for deterministic error messages.
+				a, b := existing, name
+				if a > b {
+					a, b = b, a
+				}
+				return fmt.Errorf("duplicate channel_id %q in repos %q and %q", repo.ChannelID, a, b)
 			}
 			channelIDs[repo.ChannelID] = name
 		}
@@ -191,7 +206,10 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-func Load(path string) (*Config, error) {
+// loadRaw reads the config file, applies environment variable expansion and
+// default values, but does NOT expand worktrees. Use this for operations
+// that need to write the config back to disk (like AddRepo).
+func loadRaw(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -204,14 +222,26 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
+	// Apply defaults for any zero-value fields. These three fields must stay
+	// in sync with NewDefaults().
+	defaults := NewDefaults()
 	if cfg.Defaults.LLM == "" {
-		cfg.Defaults.LLM = "claude"
+		cfg.Defaults.LLM = defaults.LLM
 	}
 	if cfg.Defaults.OutputThreshold == 0 {
-		cfg.Defaults.OutputThreshold = 1500
+		cfg.Defaults.OutputThreshold = defaults.OutputThreshold
 	}
 	if cfg.Defaults.IdleTimeout == "" {
-		cfg.Defaults.IdleTimeout = "10m"
+		cfg.Defaults.IdleTimeout = defaults.IdleTimeout
+	}
+
+	return &cfg, nil
+}
+
+func Load(path string) (*Config, error) {
+	cfg, err := loadRaw(path)
+	if err != nil {
+		return nil, err
 	}
 
 	// Expand worktrees into separate repo entries.
@@ -247,7 +277,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 func DefaultPath() string {

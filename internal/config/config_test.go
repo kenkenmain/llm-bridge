@@ -832,6 +832,38 @@ repos:
 	}
 }
 
+func TestLoad_DuplicateWorktreeName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature
+        path: /code/myproject-feature-1
+        channel_id: "222"
+      - name: feature
+        path: /code/myproject-feature-2
+        channel_id: "333"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for duplicate worktree name")
+	}
+	if !strings.Contains(err.Error(), "duplicate worktree name") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "duplicate worktree name")
+	}
+}
+
 func TestLoad_WorktreeExpansion_ConflictsWithExistingRepo(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
