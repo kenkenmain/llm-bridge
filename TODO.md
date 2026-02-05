@@ -13,6 +13,42 @@ Features to port from [zebbern/claude-code-discord](https://github.com/zebbern/c
 
 **Key Difference:** zebbern uses Discord APPLICATION_ID for bot authentication with dynamic channel creation within a category. llm-bridge uses CHANNEL_ID as the primary routing key with pre-configured repos.
 
+## PTY vs Piped I/O Comparison
+
+Why does llm-bridge use PTY while zebbern uses pipes? Here's the trade-off:
+
+| Aspect | Piped I/O (zebbern) | PTY (llm-bridge) |
+|--------|---------------------|------------------|
+| **Output** | Clean text, no escapes | Raw ANSI sequences |
+| **Complexity** | Simple | Needs ANSI stripping |
+| **Signal handling** | Manual process kill | `SIGINT` propagates naturally |
+| **Terminal detection** | CLI sees non-TTY | CLI sees real terminal |
+| **Interactive features** | Disabled/limited | Full support (menus, prompts) |
+| **Colors/formatting** | Often disabled | Full terminal colors |
+| **Cross-platform** | Consistent | Windows PTY is newer |
+| **Claude CLI behavior** | Basic output mode | Rich output mode |
+
+### Verdict: PTY is better for Claude CLI
+
+**Reasons:**
+1. **Signal propagation** - `/cancel` needs `SIGINT` to reach Claude's process group
+2. **Rich output** - Claude CLI detects TTY and enables better formatting
+3. **Interactive features** - Session resume, prompts, progress indicators work
+4. **Terminal behavior** - Line buffering, cursor control behave correctly
+
+**The fix:** Don't switch to pipes — strip ANSI escapes before sending to Discord:
+
+```go
+import "github.com/charmbracelet/x/ansi"
+
+cleaned := ansi.Strip(rawPtyOutput)  // Remove escape sequences
+provider.Send(channelID, cleaned)     // Send clean text to Discord
+```
+
+**zebbern's approach** avoids ANSI complexity by not using PTY, but loses terminal features that Claude CLI expects.
+
+---
+
 ## Priority Legend
 
 - **P1:** Critical - Blocking issues or high-value features
