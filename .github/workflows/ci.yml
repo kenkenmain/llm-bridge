@@ -32,8 +32,12 @@ jobs:
         run: bazel test //internal/provider:discord_integration_test --config=integration
 
       - name: Coverage
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_TEST_CHANNEL_ID: ${{ secrets.DISCORD_TEST_CHANNEL_ID }}
         run: |
-          bazel coverage //internal/... --combined_report=lcov --config=ci
+          bazel coverage //internal/... //internal/provider:discord_integration_test \
+            --combined_report=lcov --config=ci
           scripts/check-coverage.sh \
             --lcov-file bazel-out/_coverage/_coverage_report.dat \
             --threshold 90 \
