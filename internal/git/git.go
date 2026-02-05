@@ -205,22 +205,23 @@ func IsSafeRepoName(name string) bool {
 }
 
 // allowedURLSchemes contains the URL schemes allowed for git clone.
-var allowedURLSchemes = []string{"https://", "http://", "git://", "ssh://", "git@"}
+// Note: http:// is intentionally excluded to enforce encrypted transport.
+var allowedURLSchemes = []string{"https://", "git://", "ssh://", "git@"}
 
 // IsAllowedGitURL returns true if the URL uses an allowed scheme.
-func IsAllowedGitURL(url string) bool {
+func IsAllowedGitURL(repoURL string) bool {
 	for _, scheme := range allowedURLSchemes {
-		if strings.HasPrefix(url, scheme) {
+		if strings.HasPrefix(repoURL, scheme) {
 			return true
 		}
 	}
 	return false
 }
 
-// CloneRepo clones a git repository from url to destDir.
+// CloneRepo clones a git repository from repoURL to destDir.
 // It returns an error if destDir already exists or if the clone fails.
 // Note: URL validation should be done by the caller (e.g., bridge) for security.
-func CloneRepo(url, destDir string) error {
+func CloneRepo(repoURL, destDir string) error {
 	// Check if destination already exists.
 	if _, err := os.Stat(destDir); err == nil {
 		return fmt.Errorf("clone repo: destination %q already exists", destDir)
@@ -234,7 +235,7 @@ func CloneRepo(url, destDir string) error {
 		parentDir = "."
 	}
 
-	_, err := runGit(parentDir, "clone", url, destDir)
+	_, err := runGit(parentDir, "clone", repoURL, destDir)
 	if err != nil {
 		return fmt.Errorf("clone repo: %w", err)
 	}

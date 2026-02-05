@@ -516,7 +516,7 @@ func TestIsAllowedGitURL(t *testing.T) {
 		want bool
 	}{
 		{"https://github.com/user/repo", true},
-		{"http://example.com/repo", true},
+		{"http://example.com/repo", false}, // http:// intentionally rejected - enforce encrypted transport
 		{"git://github.com/user/repo", true},
 		{"ssh://git@github.com/user/repo", true},
 		{"git@github.com:user/repo.git", true},

@@ -587,12 +587,27 @@ func (b *Bridge) checkIdleTimeouts(timeout time.Duration) {
 }
 
 func (b *Bridge) repoForChannel(channelID string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	for name, repo := range b.cfg.Repos {
 		if repo.ChannelID == channelID {
 			return name
 		}
 	}
 	return ""
+}
+
+// repoConfigForChannel returns both the repo name and a copy of its config.
+// This is a helper to atomically get both values under lock.
+func (b *Bridge) repoConfigForChannel(channelID string) (string, config.RepoConfig, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for name, repo := range b.cfg.Repos {
+		if repo.ChannelID == channelID {
+			return name, repo, true
+		}
+	}
+	return "", config.RepoConfig{}, false
 }
 
 func (b *Bridge) getStatus(channelID string) string {
@@ -828,7 +843,7 @@ func (b *Bridge) handleClone(providerName string, args string) string {
 		return "Usage: /clone <url> <name> [channel-id]"
 	}
 
-	url := parts[0]
+	repoURL := parts[0]
 	name := parts[1]
 	var channelID string
 	if len(parts) >= 3 {
@@ -836,13 +851,21 @@ func (b *Bridge) handleClone(providerName string, args string) string {
 	}
 
 	// Security: validate URL scheme (prevents malicious URLs like ext::, file://)
-	if !git.IsAllowedGitURL(url) {
+	if !git.IsAllowedGitURL(repoURL) {
 		return "Error: URL must use https, git, or ssh scheme"
 	}
 
 	// Security: validate name uses only safe characters (alphanumeric, hyphen, underscore)
 	if !git.IsSafeRepoName(name) {
 		return "Error: name must contain only letters, numbers, hyphens, and underscores"
+	}
+
+	// Check if repo name already exists
+	b.mu.Lock()
+	_, exists := b.cfg.Repos[name]
+	b.mu.Unlock()
+	if exists {
+		return fmt.Sprintf("Error: repo %q already exists", name)
 	}
 
 	// Determine destination directory (always relative to BaseDir)
@@ -859,8 +882,8 @@ func (b *Bridge) handleClone(providerName string, args string) string {
 	}
 
 	// Clone the repository
-	if err := b.cloneRepo(url, destDir); err != nil {
-		return "Clone failed: check URL is accessible and directory doesn't exist"
+	if err := b.cloneRepo(repoURL, destDir); err != nil {
+		return fmt.Sprintf("Clone failed: %v", err)
 	}
 
 	// Create RepoConfig
@@ -907,13 +930,11 @@ func (b *Bridge) handleAddWorktree(providerName string, parentChannelID string, 
 		return "Error: branch must contain only letters, numbers, hyphens, underscores, and slashes"
 	}
 
-	// Find current repo from channel
-	parentRepoName := b.repoForChannel(parentChannelID)
-	if parentRepoName == "" {
+	// Find current repo from channel (atomically get name and config copy)
+	parentRepoName, parentRepo, found := b.repoConfigForChannel(parentChannelID)
+	if !found {
 		return "Error: no repo configured for this channel"
 	}
-
-	parentRepo := b.cfg.Repos[parentRepoName]
 
 	// Determine git root: if current repo has GitRoot set (is worktree), use GitRoot; otherwise use WorkingDir
 	parentGitRoot := parentRepo.GitRoot
@@ -927,6 +948,14 @@ func (b *Bridge) handleAddWorktree(providerName string, parentChannelID string, 
 	// Create child repo name with parent/child naming
 	childName := parentRepoName + "/" + name
 
+	// Check if child name already exists
+	b.mu.Lock()
+	_, exists := b.cfg.Repos[childName]
+	b.mu.Unlock()
+	if exists {
+		return fmt.Sprintf("Error: repo %q already exists", childName)
+	}
+
 	// Determine channel ID based on provider
 	if newChannelID == "" {
 		if providerName == "discord" {
@@ -938,7 +967,7 @@ func (b *Bridge) handleAddWorktree(providerName string, parentChannelID string, 
 
 	// Create the worktree
 	if err := b.addWorktree(parentGitRoot, wtDir, branch); err != nil {
-		return "Failed to create worktree: check branch doesn't already exist"
+		return fmt.Sprintf("Failed to create worktree: %v", err)
 	}
 
 	// Create RepoConfig
