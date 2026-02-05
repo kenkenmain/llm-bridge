@@ -15,6 +15,7 @@ go_library(
 go_test(
     name = "llm_test",
     srcs = [
+        "claude_stub_test.go",
         "claude_test.go",
         "factory_test.go",
     ],

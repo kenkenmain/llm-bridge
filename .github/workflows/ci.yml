@@ -25,6 +25,12 @@ jobs:
       - name: Test
         run: bazel test //... --config=ci
 
+      - name: Integration Tests
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_TEST_CHANNEL_ID: ${{ secrets.DISCORD_TEST_CHANNEL_ID }}
+        run: bazel test //internal/provider:discord_integration_test --config=integration
+
       - name: Coverage
         run: |
           bazel coverage //internal/... --combined_report=lcov --config=ci
