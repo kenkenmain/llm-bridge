@@ -25,16 +25,16 @@ go_test(
 
 go_test(
     name = "discord_integration_test",
+    size = "large",
     srcs = ["discord_integration_test.go"],
     embed = [":provider"],
-    gotags = ["integration"],
-    size = "large",
     tags = [
         "integration",
         "manual",
         "no-sandbox",
     ],
     deps = [
+        "//internal/config",
         "@com_github_bwmarrin_discordgo//:discordgo",
     ],
 )

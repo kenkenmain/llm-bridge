@@ -1,6 +1,7 @@
 package router
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -126,6 +127,35 @@ func TestParseCommand(t *testing.T) {
 			}
 			if args != tt.wantArg {
 				t.Errorf("parseCommand(%q) args = %q, want %q", tt.input, args, tt.wantArg)
+			}
+		})
+	}
+}
+
+func TestParse_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantTyp RouteType
+		wantRaw string
+	}{
+		{"empty string", "", RouteToLLM, ""},
+		{"whitespace only", "   \t\n  ", RouteToLLM, ""},
+		{"single slash", "/", RouteToLLM, "/"},
+		{"double colon only", "::", RouteToLLM, "/"},
+		{"unicode emoji", "🚀 deploy", RouteToLLM, "🚀 deploy"},
+		{"unicode RTL", "مرحبا", RouteToLLM, "مرحبا"},
+		{"null byte in middle", "hello\x00world", RouteToLLM, "hello\x00world"},
+		{"very long input", strings.Repeat("a", 10240), RouteToLLM, strings.Repeat("a", 10240)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			route := Parse(tt.input)
+			if route.Type != tt.wantTyp {
+				t.Errorf("Parse(%q).Type = %v, want %v", tt.input, route.Type, tt.wantTyp)
+			}
+			if route.Raw != tt.wantRaw {
+				t.Errorf("Parse(%q).Raw = %q, want %q", tt.input, route.Raw, tt.wantRaw)
 			}
 		})
 	}

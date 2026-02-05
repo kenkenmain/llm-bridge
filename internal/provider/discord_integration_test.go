@@ -1,5 +1,3 @@
-//go:build integration
-
 package provider
 
 import (
@@ -9,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/llm-bridge/internal/config"
 	"github.com/bwmarrin/discordgo"
 )
 

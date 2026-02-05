@@ -8,7 +8,7 @@ import (
 
 // Message represents input from a source
 type Message struct {
-	Source  string // "discord", "telegram", "terminal"
+	Source  string // "discord", "terminal"
 	Content string
 }
 
@@ -38,6 +38,6 @@ type LLM interface {
 	// UpdateActivity updates the last activity timestamp
 	UpdateActivity()
 
-	// Name returns the LLM backend name ("claude", "codex")
+	// Name returns the LLM backend name (e.g. "claude")
 	Name() string
 }

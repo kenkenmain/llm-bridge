@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ repos:
     working_dir: /tmp/test
 
 defaults:
-  llm: codex
+  llm: custom-llm
   output_threshold: 2000
   idle_timeout: 5m
   resume_session: false
@@ -51,8 +52,8 @@ providers:
 		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "123456")
 	}
 
-	if cfg.Defaults.LLM != "codex" {
-		t.Errorf("Defaults.LLM = %q, want %q", cfg.Defaults.LLM, "codex")
+	if cfg.Defaults.LLM != "custom-llm" {
+		t.Errorf("Defaults.LLM = %q, want %q", cfg.Defaults.LLM, "custom-llm")
 	}
 	if cfg.Defaults.OutputThreshold != 2000 {
 		t.Errorf("Defaults.OutputThreshold = %d, want 2000", cfg.Defaults.OutputThreshold)
@@ -123,7 +124,7 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	if err := os.WriteFile(path, []byte("invalid: yaml: content:"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("{{not yaml"), 0600); err != nil {
 		t.Fatalf("write test config: %v", err)
 	}
 
@@ -800,5 +801,376 @@ repos:
 
 	if len(cfg.Repos) != 3 {
 		t.Errorf("len(Repos) = %d, want 3", len(cfg.Repos))
+	}
+}
+
+func TestConfig_Validate_DuplicateChannelID_ParentAndWorktreeChild(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature
+        path: /code/myproject-feature
+        channel_id: "111111"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for duplicate channel_id between parent and worktree child")
+	}
+	if !strings.Contains(err.Error(), "duplicate channel_id") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "duplicate channel_id")
+	}
+}
+
+func TestLoad_DuplicateWorktreeName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature
+        path: /code/myproject-feature-1
+        channel_id: "222"
+      - name: feature
+        path: /code/myproject-feature-2
+        channel_id: "333"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for duplicate worktree name")
+	}
+	if !strings.Contains(err.Error(), "duplicate worktree name") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "duplicate worktree name")
+	}
+}
+
+func TestLoad_WorktreeExpansion_ConflictsWithExistingRepo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  myproject:
+    provider: discord
+    channel_id: "111111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: child
+        path: /code/myproject-child
+        channel_id: "222222"
+  myproject/child:
+    provider: discord
+    channel_id: "333333"
+    llm: claude
+    working_dir: /code/other
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for worktree conflicting with existing repo")
+	}
+	if !strings.Contains(err.Error(), "conflicts with existing repo") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "conflicts with existing repo")
+	}
+}
+
+func TestLoad_MultipleRepos_WithWorktrees_UniqueChannelIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos:
+  project-a:
+    provider: discord
+    channel_id: "100"
+    llm: claude
+    working_dir: /code/a
+    worktrees:
+      - name: feat-1
+        path: /code/a-feat-1
+        channel_id: "101"
+      - name: feat-2
+        path: /code/a-feat-2
+        channel_id: "102"
+  project-b:
+    provider: discord
+    channel_id: "200"
+    llm: claude
+    working_dir: /code/b
+    worktrees:
+      - name: feat-1
+        path: /code/b-feat-1
+        channel_id: "201"
+      - name: feat-2
+        path: /code/b-feat-2
+        channel_id: "202"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Repos) != 6 {
+		t.Fatalf("len(Repos) = %d, want 6", len(cfg.Repos))
+	}
+
+	// Verify each expanded entry has the correct channel_id.
+	expected := map[string]string{
+		"project-a":        "100",
+		"project-a/feat-1": "101",
+		"project-a/feat-2": "102",
+		"project-b":        "200",
+		"project-b/feat-1": "201",
+		"project-b/feat-2": "202",
+	}
+	for name, wantCh := range expected {
+		repo, ok := cfg.Repos[name]
+		if !ok {
+			t.Errorf("missing repo entry %q", name)
+			continue
+		}
+		if repo.ChannelID != wantCh {
+			t.Errorf("repo %q ChannelID = %q, want %q", name, repo.ChannelID, wantCh)
+		}
+	}
+}
+
+func TestLoad_DefaultsMatchNewDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	// Empty config — loadRaw should apply defaults identical to NewDefaults().
+	if err := os.WriteFile(path, []byte("repos: {}\n"), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	want := NewDefaults()
+	if !reflect.DeepEqual(cfg.Defaults, want) {
+		t.Errorf("Defaults = %+v, want %+v", cfg.Defaults, want)
+	}
+}
+
+func TestLoad_InvalidIdleTimeout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+defaults:
+  idle_timeout: "not-a-duration"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for invalid idle_timeout")
+	}
+	if !strings.Contains(err.Error(), "invalid idle_timeout") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "invalid idle_timeout")
+	}
+}
+
+func TestLoad_NegativeOutputThreshold(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := "repos: {}\ndefaults:\n  output_threshold: -1\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for negative output_threshold")
+	}
+	if !strings.Contains(err.Error(), "invalid output_threshold") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "invalid output_threshold")
+	}
+}
+
+func TestLoad_NegativeRateLimitValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "negative user_rate",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    user_rate: -1.0\n",
+			wantErr: "invalid user_rate",
+		},
+		{
+			name:    "negative user_burst",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    user_burst: -1\n",
+			wantErr: "invalid user_burst",
+		},
+		{
+			name:    "negative channel_rate",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    channel_rate: -0.5\n",
+			wantErr: "invalid channel_rate",
+		},
+		{
+			name:    "negative channel_burst",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    channel_burst: -10\n",
+			wantErr: "invalid channel_burst",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("write test config: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil {
+				t.Fatalf("Load() expected error for %s", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_OutputThresholdZero(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := "repos: {}\ndefaults:\n  output_threshold: 0\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	// Zero is accepted (no error), but loadRaw replaces zero with the default.
+	// This verifies zero does not cause validation errors (unlike negative values).
+	if cfg.Defaults.OutputThreshold != 1500 {
+		t.Errorf("OutputThreshold = %d, want 1500 (default applied to zero)", cfg.Defaults.OutputThreshold)
+	}
+}
+
+func TestLoad_OutputThresholdMaxInt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Use max int32 value (2147483647) to verify large thresholds do not panic
+	content := "repos: {}\ndefaults:\n  output_threshold: 2147483647\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Defaults.OutputThreshold != 2147483647 {
+		t.Errorf("OutputThreshold = %d, want 2147483647", cfg.Defaults.OutputThreshold)
+	}
+}
+
+func TestLoad_RepoNameWithSlash(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Repo names with slashes are valid (used for worktrees like "project/feature")
+	content := `
+repos:
+  org/project:
+    provider: discord
+    channel_id: "123456"
+    llm: claude
+    working_dir: /code/project
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	repo, ok := cfg.Repos["org/project"]
+	if !ok {
+		t.Fatal("missing repo entry org/project")
+	}
+	if repo.ChannelID != "123456" {
+		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "123456")
+	}
+	if repo.WorkingDir != "/code/project" {
+		t.Errorf("repo.WorkingDir = %q, want %q", repo.WorkingDir, "/code/project")
+	}
+}
+
+func TestLoad_RepoNameWithControlChars(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Repo names with control characters should not cause panics.
+	// YAML allows them when quoted; the config loader should handle gracefully.
+	content := `
+repos:
+  "repo\twith\ttabs":
+    provider: discord
+    channel_id: "123456"
+    llm: claude
+    working_dir: /code/project
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	// Should not panic; we just verify it loads without panicking.
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	// Verify the repo with control chars was loaded.
+	if len(cfg.Repos) != 1 {
+		t.Errorf("len(Repos) = %d, want 1", len(cfg.Repos))
+	}
+	// The key should contain actual tab characters after YAML parsing.
+	found := false
+	for name := range cfg.Repos {
+		if strings.Contains(name, "\t") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected repo name to contain tab characters")
 	}
 }
