@@ -273,3 +273,53 @@ func TestTerminal_ReadLoop_StoppedWhileReading(t *testing.T) {
 	// Drain any messages
 	time.Sleep(20 * time.Millisecond)
 }
+
+func TestTerminal_ReadLoop_EmptyLines(t *testing.T) {
+	// Input with empty lines: "line1", "", "line2"
+	input := "line1\n\nline2\n"
+	reader := strings.NewReader(input)
+
+	term := &Terminal{
+		channelID: "test",
+		reader:    reader,
+		writer:    &bytes.Buffer{},
+		messages:  make(chan Message, 10),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	if err := term.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Wait for messages to be processed
+	time.Sleep(50 * time.Millisecond)
+
+	// Collect all messages
+	var messages []Message
+	for {
+		select {
+		case msg := <-term.Messages():
+			messages = append(messages, msg)
+		default:
+			goto done
+		}
+	}
+done:
+
+	// Verify we received 3 messages: "line1", "", "line2"
+	if len(messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(messages))
+	}
+
+	expectedContents := []string{"line1", "", "line2"}
+	for i, expected := range expectedContents {
+		if messages[i].Content != expected {
+			t.Errorf("message[%d].Content = %q, want %q", i, messages[i].Content, expected)
+		}
+		if messages[i].Source != "terminal" {
+			t.Errorf("message[%d].Source = %q, want %q", i, messages[i].Source, "terminal")
+		}
+	}
+}

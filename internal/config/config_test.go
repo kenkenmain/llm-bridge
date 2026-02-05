@@ -1031,23 +1031,23 @@ func TestLoad_NegativeRateLimitValues(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "negative user_rate",
-			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    user_rate: -1.0\n",
+			name:    "negative user_rate",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    user_rate: -1.0\n",
 			wantErr: "invalid user_rate",
 		},
 		{
-			name: "negative user_burst",
-			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    user_burst: -1\n",
+			name:    "negative user_burst",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    user_burst: -1\n",
 			wantErr: "invalid user_burst",
 		},
 		{
-			name: "negative channel_rate",
-			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    channel_rate: -0.5\n",
+			name:    "negative channel_rate",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    channel_rate: -0.5\n",
 			wantErr: "invalid channel_rate",
 		},
 		{
-			name: "negative channel_burst",
-			yaml: "repos: {}\ndefaults:\n  rate_limit:\n    channel_burst: -10\n",
+			name:    "negative channel_burst",
+			yaml:    "repos: {}\ndefaults:\n  rate_limit:\n    channel_burst: -10\n",
 			wantErr: "invalid channel_burst",
 		},
 	}
@@ -1068,5 +1068,109 @@ func TestLoad_NegativeRateLimitValues(t *testing.T) {
 				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoad_OutputThresholdZero(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := "repos: {}\ndefaults:\n  output_threshold: 0\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	// Zero is accepted (no error), but loadRaw replaces zero with the default.
+	// This verifies zero does not cause validation errors (unlike negative values).
+	if cfg.Defaults.OutputThreshold != 1500 {
+		t.Errorf("OutputThreshold = %d, want 1500 (default applied to zero)", cfg.Defaults.OutputThreshold)
+	}
+}
+
+func TestLoad_OutputThresholdMaxInt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Use max int32 value (2147483647) to verify large thresholds do not panic
+	content := "repos: {}\ndefaults:\n  output_threshold: 2147483647\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Defaults.OutputThreshold != 2147483647 {
+		t.Errorf("OutputThreshold = %d, want 2147483647", cfg.Defaults.OutputThreshold)
+	}
+}
+
+func TestLoad_RepoNameWithSlash(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Repo names with slashes are valid (used for worktrees like "project/feature")
+	content := `
+repos:
+  org/project:
+    provider: discord
+    channel_id: "123456"
+    llm: claude
+    working_dir: /code/project
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	repo, ok := cfg.Repos["org/project"]
+	if !ok {
+		t.Fatal("missing repo entry org/project")
+	}
+	if repo.ChannelID != "123456" {
+		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "123456")
+	}
+	if repo.WorkingDir != "/code/project" {
+		t.Errorf("repo.WorkingDir = %q, want %q", repo.WorkingDir, "/code/project")
+	}
+}
+
+func TestLoad_RepoNameWithControlChars(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Repo names with control characters should not cause panics.
+	// YAML allows them when quoted; the config loader should handle gracefully.
+	content := `
+repos:
+  "repo\twith\ttabs":
+    provider: discord
+    channel_id: "123456"
+    llm: claude
+    working_dir: /code/project
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	// Should not panic; we just verify it loads without panicking.
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	// Verify the repo with control chars was loaded.
+	if len(cfg.Repos) != 1 {
+		t.Errorf("len(Repos) = %d, want 1", len(cfg.Repos))
+	}
+	// The key should contain actual tab characters after YAML parsing.
+	found := false
+	for name := range cfg.Repos {
+		if strings.Contains(name, "\t") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected repo name to contain tab characters")
 	}
 }

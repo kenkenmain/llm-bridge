@@ -2247,3 +2247,99 @@ func TestBridge_Start_WithDiscord_WorktreeChannels(t *testing.T) {
 		t.Errorf("discord factory missing expected channel IDs: %v", capturedChannelIDs)
 	}
 }
+
+func TestBridge_ProcessTerminalMessage_SelectPathTraversal(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	term := provider.NewTerminal("terminal")
+
+	// Test various path traversal attempts
+	pathTraversalCases := []string{
+		"/select ../etc/passwd",
+		"/select ../../secret",
+		"/select test-repo/../other",
+		"/select ./test-repo",
+		"/select test-repo/./sub",
+	}
+
+	for _, content := range pathTraversalCases {
+		msg := provider.Message{
+			ChannelID: "terminal",
+			Content:   content,
+			Source:    "terminal",
+		}
+
+		// Should not panic
+		b.processTerminalMessage(context.Background(), term, msg)
+
+		// Verify the path traversal string was not selected as repo name
+		b.mu.Lock()
+		selected := b.terminalRepoName
+		b.mu.Unlock()
+
+		// The repo name should not contain path traversal characters
+		if strings.Contains(selected, "..") || strings.Contains(selected, "./") {
+			t.Errorf("path traversal string should not be selected as repo name: %q", selected)
+		}
+	}
+
+	// Test passes if no panics occurred
+}
+
+func TestBridge_ProcessTerminalMessage_SelectVeryLong(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	term := provider.NewTerminal("terminal")
+
+	// Create a very long repo name (1000+ characters)
+	longRepoName := strings.Repeat("a", 1500)
+	msg := provider.Message{
+		ChannelID: "terminal",
+		Content:   "/select " + longRepoName,
+		Source:    "terminal",
+	}
+
+	// Should not panic even with very long input
+	b.processTerminalMessage(context.Background(), term, msg)
+
+	// Verify the very long string was not selected (it's not a valid repo)
+	b.mu.Lock()
+	selected := b.terminalRepoName
+	b.mu.Unlock()
+
+	if selected == longRepoName {
+		t.Error("very long string should not be selected as repo name (not in config)")
+	}
+
+	// Test passes if no panic occurred
+}
+
+func TestBridge_ProcessTerminalMessage_SelectWhitespaceOnly(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg)
+
+	term := provider.NewTerminal("terminal")
+
+	// Test whitespace-only args
+	whitespaceCases := []string{
+		"/select    ",      // spaces only
+		"/select \t",       // tab
+		"/select \n",       // newline
+		"/select   \t  \n", // mixed whitespace
+	}
+
+	for _, content := range whitespaceCases {
+		msg := provider.Message{
+			ChannelID: "terminal",
+			Content:   content,
+			Source:    "terminal",
+		}
+
+		// Should not panic
+		b.processTerminalMessage(context.Background(), term, msg)
+	}
+
+	// Test passes if no panics occurred - whitespace args should be handled gracefully
+}
