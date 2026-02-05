@@ -82,7 +82,25 @@ make stop           # docker-compose down
 
 ## Configuration
 
-Copy `llm-bridge.yaml.example` to `llm-bridge.yaml`:
+Copy `llm-bridge.yaml.example` to `llm-bridge.yaml`.
+
+### Minimal Configuration (Self-Discovery Mode)
+
+You can start with just defaults - no pre-defined repos required! Use `/clone` from Discord to add repos dynamically:
+
+```yaml
+defaults:
+  base_dir: /home/user/repos  # where /clone creates new repos
+  llm: claude
+
+providers:
+  discord:
+    bot_token: "${DISCORD_BOT_TOKEN}"
+```
+
+Then from Discord: `/clone https://github.com/user/repo myrepo 123456789012345678`
+
+### Full Configuration (Pre-defined Repos)
 
 ```yaml
 repos:
@@ -93,17 +111,24 @@ repos:
     working_dir: /path/to/repo
 
 defaults:
+  base_dir: /home/user/repos
   llm: claude
   idle_timeout: 10m
   rate_limit:
     enabled: true
     user_rate: 0.5
     user_burst: 3
+
+providers:
+  discord:
+    bot_token: "${DISCORD_BOT_TOKEN}"
 ```
 
 See `llm-bridge.yaml.example` for all options.
 
 ## Commands
+
+### Session Control
 
 | Input            | Description                   |
 | ---------------- | ----------------------------- |
@@ -113,6 +138,16 @@ See `llm-bridge.yaml.example` for all options.
 | `/select <repo>` | Select repo for terminal      |
 | `/help`          | Show available commands        |
 | `::commit`       | Translates to `/commit` for LLM |
+
+### Dynamic Repo Management
+
+| Input                                      | Description                        |
+| ------------------------------------------ | ---------------------------------- |
+| `/clone <url> <name> <channel-id>`         | Clone a git repo and register it (channel-id required for Discord) |
+| `/add-worktree <name> <branch> <channel-id>` | Create worktree from current repo (channel-id required for Discord) |
+| `/list-repos`                              | List all configured repos          |
+| `/remove-repo <name>`                      | Remove a repo from config          |
+| `/worktrees`                               | List git worktrees for current repo|
 
 ## Architecture
 

@@ -141,12 +141,41 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 
 ## Add Repo
 
+### Dynamic (from Discord/Terminal)
+
+Use `/clone` to add repos at runtime without restarting:
+
+```
+/clone https://github.com/user/repo myrepo 123456789012345678
+```
+
+For Discord, `channel-id` is the 18-digit Discord channel ID (enable Developer Mode to copy).
+
+The repo is cloned to `defaults.base_dir/<name>` and immediately available.
+
+### CLI (before starting)
+
 ```bash
 ./llm-bridge add-repo myrepo \
   --provider discord \
   --channel 123456789 \
   --llm claude \
   --dir /path/to/repo
+```
+
+### Zero-Config Start
+
+You can start with no pre-defined repos and use `/clone` to add them dynamically:
+
+```yaml
+# Minimal llm-bridge.yaml
+defaults:
+  base_dir: /home/user/repos
+  llm: claude
+
+providers:
+  discord:
+    bot_token: "${DISCORD_BOT_TOKEN}"
 ```
 
 ## Architecture
@@ -164,7 +193,7 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 - Lint runs **outside Bazel sandbox** (`no-sandbox` tag) — needs network for first `golangci-lint` download
 - Only `claude` LLM backend exists (Codex was removed). Factory defaults empty string to `claude`
 - Claude is spawned via PTY (`creack/pty`), not stdin pipe — output parsing depends on terminal behavior
-- `llm-bridge.yaml.example` was removed; see `internal/config/` tests for config structure
+- See `llm-bridge.yaml.example` for config structure; can start with empty `repos:` and use `/clone` dynamically
 - Bazel builds are fully hermetic (Go SDK downloaded automatically) — only Bazelisk + Node.js needed on host
 - Docker solves deployment packaging, not build reproducibility (Bazel already handles that)
 - Discord bot requires **Message Content Intent** (privileged) enabled in the Developer Portal — without it, the bot receives empty messages. See `docs/discord-setup.md`
@@ -200,8 +229,8 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 
 | Input                                      | Handler | Description                        |
 | ------------------------------------------ | ------- | ---------------------------------- |
-| `/clone <url> <name> [channel-id]`         | Bridge  | Clone a git repo and register it   |
-| `/add-worktree <name> <branch> [channel-id]` | Bridge  | Create worktree from current repo  |
+| `/clone <url> <name> <channel-id>`         | Bridge  | Clone a git repo and register it (channel-id required for Discord) |
+| `/add-worktree <name> <branch> <channel-id>` | Bridge  | Create worktree from current repo (channel-id required for Discord) |
 | `/list-repos`                              | Bridge  | List all configured repos          |
 | `/remove-repo <name>`                      | Bridge  | Remove a repo from config          |
 | `/worktrees`                               | Bridge  | List git worktrees for current repo|
