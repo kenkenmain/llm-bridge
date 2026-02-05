@@ -2,6 +2,8 @@ package provider
 
 import (
 	"testing"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 func TestNewDiscord(t *testing.T) {
@@ -126,5 +128,287 @@ func TestDiscord_MessageWithoutAuthorID(t *testing.T) {
 
 	if msg.AuthorID != "" {
 		t.Error("terminal messages should have empty AuthorID")
+	}
+}
+
+func TestDiscord_MultipleChannels(t *testing.T) {
+	d := NewDiscord("token", []string{"ch1", "ch2", "ch3"})
+	if len(d.channels) != 3 {
+		t.Errorf("expected 3 channels, got %d", len(d.channels))
+	}
+	for _, ch := range []string{"ch1", "ch2", "ch3"} {
+		if !d.channels[ch] {
+			t.Errorf("channel %q should be in map", ch)
+		}
+	}
+}
+
+func TestDiscord_DuplicateChannels(t *testing.T) {
+	// Duplicate channel IDs should be deduplicated by the map
+	d := NewDiscord("token", []string{"ch1", "ch1", "ch2"})
+	if len(d.channels) != 2 {
+		t.Errorf("expected 2 unique channels, got %d", len(d.channels))
+	}
+}
+
+func TestDiscord_MessagesChannel_Buffered(t *testing.T) {
+	d := NewDiscord("token", []string{"ch1"})
+	// Verify the messages channel has buffer capacity
+	ch := d.Messages()
+	if cap(ch) != 100 {
+		t.Errorf("messages channel capacity = %d, want 100", cap(ch))
+	}
+}
+
+func TestDiscord_Stop_ClosesMessagesChannel(t *testing.T) {
+	d := NewDiscord("token", []string{"ch1"})
+	ch := d.Messages()
+
+	_ = d.Stop()
+
+	// After stop, channel should be closed
+	_, open := <-ch
+	if open {
+		t.Error("messages channel should be closed after Stop()")
+	}
+}
+
+func TestDiscord_Send_ErrorMessage(t *testing.T) {
+	d := NewDiscord("token", []string{"ch1"})
+	// session is nil, so Send should fail with specific error
+	err := d.Send("ch1", "test")
+	if err == nil || err.Error() != "discord not connected" {
+		t.Errorf("Send() error = %v, want 'discord not connected'", err)
+	}
+}
+
+func TestDiscord_SendFile_ErrorMessage(t *testing.T) {
+	d := NewDiscord("token", []string{"ch1"})
+	// session is nil, so SendFile should fail with specific error
+	err := d.SendFile("ch1", "file.txt", []byte("data"))
+	if err == nil || err.Error() != "discord not connected" {
+		t.Errorf("SendFile() error = %v, want 'discord not connected'", err)
+	}
+}
+
+func TestDiscord_StoppedFlag(t *testing.T) {
+	d := NewDiscord("token", []string{"ch1"})
+
+	if d.stopped {
+		t.Error("stopped should be false initially")
+	}
+
+	_ = d.Stop()
+
+	if !d.stopped {
+		t.Error("stopped should be true after Stop()")
+	}
+}
+
+func TestDiscord_Stop_WithSession(t *testing.T) {
+	d := NewDiscord("token", []string{"ch1"})
+
+	// Set a session directly to test the session.Close() path
+	// The session will fail to close (no connection) but should not panic
+	d.session = &discordgo.Session{}
+
+	err := d.Stop()
+	if err != nil {
+		t.Errorf("Stop() error = %v", err)
+	}
+
+	if !d.stopped {
+		t.Error("stopped should be true after Stop()")
+	}
+}
+
+func TestDiscord_Token(t *testing.T) {
+	d := NewDiscord("my-secret-token", []string{"ch1"})
+	if d.token != "my-secret-token" {
+		t.Errorf("token = %q, want %q", d.token, "my-secret-token")
+	}
+}
+
+func TestDiscord_HandleMessage_BotMessage(t *testing.T) {
+	d := NewDiscord("token", []string{"allowed-channel"})
+
+	// Create a session with a bot user
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+	d.session = session
+
+	// Create a message from the bot itself - should be ignored
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "allowed-channel",
+			Content:   "bot message",
+			Author:    &discordgo.User{ID: "bot-id", Username: "BotUser"},
+		},
+	}
+
+	d.handleMessage(session, msg)
+
+	// Should not receive any message (bot's own message is ignored)
+	select {
+	case <-d.Messages():
+		t.Error("should not receive bot's own message")
+	default:
+		// Expected
+	}
+}
+
+func TestDiscord_HandleMessage_DisallowedChannel(t *testing.T) {
+	d := NewDiscord("token", []string{"allowed-channel"})
+
+	// Create a session with a bot user
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+	d.session = session
+
+	// Create a message from another user in a disallowed channel
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "other-channel", // Not in allowed channels
+			Content:   "hello",
+			Author:    &discordgo.User{ID: "user-id", Username: "TestUser"},
+		},
+	}
+
+	d.handleMessage(session, msg)
+
+	// Should not receive message from disallowed channel
+	select {
+	case <-d.Messages():
+		t.Error("should not receive message from disallowed channel")
+	default:
+		// Expected
+	}
+}
+
+func TestDiscord_HandleMessage_Success(t *testing.T) {
+	d := NewDiscord("token", []string{"allowed-channel"})
+
+	// Create a session with a bot user
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+	d.session = session
+
+	// Create a valid message from another user in an allowed channel
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "allowed-channel",
+			Content:   "hello world",
+			Author:    &discordgo.User{ID: "user-123", Username: "TestUser"},
+		},
+	}
+
+	d.handleMessage(session, msg)
+
+	// Should receive the message
+	select {
+	case received := <-d.Messages():
+		if received.ChannelID != "allowed-channel" {
+			t.Errorf("ChannelID = %q, want %q", received.ChannelID, "allowed-channel")
+		}
+		if received.Content != "hello world" {
+			t.Errorf("Content = %q, want %q", received.Content, "hello world")
+		}
+		if received.Author != "TestUser" {
+			t.Errorf("Author = %q, want %q", received.Author, "TestUser")
+		}
+		if received.AuthorID != "user-123" {
+			t.Errorf("AuthorID = %q, want %q", received.AuthorID, "user-123")
+		}
+		if received.Source != "discord" {
+			t.Errorf("Source = %q, want %q", received.Source, "discord")
+		}
+	default:
+		t.Error("expected to receive message")
+	}
+}
+
+func TestDiscord_HandleMessage_Stopped(t *testing.T) {
+	d := NewDiscord("token", []string{"allowed-channel"})
+
+	// Create a session with a bot user
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+	d.session = session
+
+	// Stop the discord first
+	_ = d.Stop()
+
+	// Try to send a message after stopping
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "allowed-channel",
+			Content:   "hello",
+			Author:    &discordgo.User{ID: "user-id", Username: "TestUser"},
+		},
+	}
+
+	// This should not panic even though messages channel is closed
+	d.handleMessage(session, msg)
+}
+
+func TestDiscord_HandleMessage_ChannelFull(t *testing.T) {
+	// Create discord with a tiny buffer
+	d := &Discord{
+		token:    "token",
+		channels: map[string]bool{"allowed-channel": true},
+		messages: make(chan Message, 1), // Only 1 slot
+	}
+
+	// Create a session with a bot user
+	session := &discordgo.Session{
+		State: discordgo.NewState(),
+	}
+	session.State.User = &discordgo.User{ID: "bot-id"}
+	d.session = session
+
+	// Fill the channel
+	msg1 := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "allowed-channel",
+			Content:   "first",
+			Author:    &discordgo.User{ID: "user-id", Username: "TestUser"},
+		},
+	}
+	d.handleMessage(session, msg1)
+
+	// Second message should be dropped (channel full) but not block
+	msg2 := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ChannelID: "allowed-channel",
+			Content:   "second",
+			Author:    &discordgo.User{ID: "user-id", Username: "TestUser"},
+		},
+	}
+	d.handleMessage(session, msg2)
+
+	// Only first message should be in channel
+	select {
+	case received := <-d.Messages():
+		if received.Content != "first" {
+			t.Errorf("expected first message, got %q", received.Content)
+		}
+	default:
+		t.Error("expected at least one message")
+	}
+
+	// Channel should be empty now (second message was dropped)
+	select {
+	case <-d.Messages():
+		t.Error("channel should be empty after draining")
+	default:
+		// Expected
 	}
 }
