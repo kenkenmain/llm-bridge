@@ -429,3 +429,165 @@ func TestSplitWorktreeBlocks_Empty(t *testing.T) {
 		t.Errorf("len(blocks) = %d, want 0 for empty input", len(blocks))
 	}
 }
+
+func TestCloneRepo_Success(t *testing.T) {
+	sourceDir := setupTestRepo(t)
+	destDir := filepath.Join(t.TempDir(), "cloned-repo")
+
+	err := CloneRepo(sourceDir, destDir)
+	if err != nil {
+		t.Fatalf("CloneRepo() error = %v", err)
+	}
+
+	// Verify the clone is a valid git repo.
+	if !IsGitRepo(destDir) {
+		t.Error("cloned directory is not a git repo")
+	}
+
+	// Verify the README.md file exists.
+	readmePath := filepath.Join(destDir, "README.md")
+	if _, err := os.Stat(readmePath); err != nil {
+		t.Errorf("README.md not found in cloned repo: %v", err)
+	}
+}
+
+func TestCloneRepo_DestExists(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH, skipping test")
+	}
+
+	sourceDir := setupTestRepo(t)
+	destDir := t.TempDir() // This directory already exists.
+
+	err := CloneRepo(sourceDir, destDir)
+	if err == nil {
+		t.Error("CloneRepo() expected error when destination exists")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error should mention 'already exists', got: %v", err)
+	}
+}
+
+func TestCloneRepo_InvalidURL(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH, skipping test")
+	}
+
+	destDir := filepath.Join(t.TempDir(), "cloned-repo")
+
+	// Test non-existent local path - git will fail to clone
+	err := CloneRepo("/nonexistent/invalid/repo/path", destDir)
+	if err == nil {
+		t.Error("CloneRepo() expected error for invalid URL")
+	}
+}
+
+func TestIsSafeRepoName(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"valid-name", true},
+		{"valid_name", true},
+		{"ValidName123", true},
+		{"123numeric", true},
+		{"has space", false},
+		{"has.dot", false},
+		{"has/slash", false},
+		{"has..dots", false},
+		{"", false},
+		{"../traversal", false},
+		{"path/to/dir", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsSafeRepoName(tt.name)
+			if got != tt.want {
+				t.Errorf("IsSafeRepoName(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAllowedGitURL(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"https://github.com/user/repo", true},
+		{"http://example.com/repo", false}, // http:// intentionally rejected - enforce encrypted transport
+		{"git://github.com/user/repo", true},
+		{"ssh://git@github.com/user/repo", true},
+		{"git@github.com:user/repo.git", true},
+		{"file:///local/path", false},
+		{"ext::sh -c whoami", false},
+		{"/absolute/path", false},
+		{"../relative/path", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got := IsAllowedGitURL(tt.url)
+			if got != tt.want {
+				t.Errorf("IsAllowedGitURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddWorktree_Success(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	wtDir := filepath.Join(t.TempDir(), "new-worktree")
+
+	err := AddWorktree(repoDir, wtDir, "feature-test")
+	if err != nil {
+		t.Fatalf("AddWorktree() error = %v", err)
+	}
+
+	// Verify the worktree was created.
+	if !IsGitRepo(wtDir) {
+		t.Error("worktree directory is not a git repo")
+	}
+
+	// Verify the branch name.
+	branch, err := CurrentBranch(wtDir)
+	if err != nil {
+		t.Fatalf("CurrentBranch() error = %v", err)
+	}
+	if branch != "feature-test" {
+		t.Errorf("branch = %q, want %q", branch, "feature-test")
+	}
+}
+
+func TestAddWorktree_DirExists(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH, skipping test")
+	}
+
+	repoDir := setupTestRepo(t)
+	wtDir := t.TempDir() // This directory already exists.
+
+	err := AddWorktree(repoDir, wtDir, "feature-test")
+	if err == nil {
+		t.Error("AddWorktree() expected error when directory exists")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error should mention 'already exists', got: %v", err)
+	}
+}
+
+func TestAddWorktree_InvalidRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH, skipping test")
+	}
+
+	repoDir := t.TempDir() // Not a git repo.
+	wtDir := filepath.Join(t.TempDir(), "new-worktree")
+
+	err := AddWorktree(repoDir, wtDir, "feature-test")
+	if err == nil {
+		t.Error("AddWorktree() expected error for non-git directory")
+	}
+}

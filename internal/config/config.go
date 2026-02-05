@@ -39,6 +39,7 @@ type Defaults struct {
 	IdleTimeout     string          `yaml:"idle_timeout"`
 	ResumeSession   *bool           `yaml:"resume_session"`
 	RateLimit       RateLimitConfig `yaml:"rate_limit"`
+	BaseDir         string          `yaml:"base_dir"`
 }
 
 // NewDefaults returns the default values for the Defaults struct.
@@ -131,6 +132,15 @@ func (d Defaults) GetIdleTimeoutDuration() time.Duration {
 		return 10 * time.Minute
 	}
 	return dur
+}
+
+// GetBaseDir returns the base directory for cloned repos.
+// Defaults to "." if not explicitly set.
+func (d Defaults) GetBaseDir() string {
+	if d.BaseDir == "" {
+		return "."
+	}
+	return d.BaseDir
 }
 
 type ProviderConfigs struct {
@@ -280,6 +290,11 @@ func loadRaw(path string) (*Config, error) {
 	}
 	if rl.ChannelBurst < 0 {
 		return nil, fmt.Errorf("invalid channel_burst %d: must be non-negative", rl.ChannelBurst)
+	}
+
+	// Validate base_dir: empty and "." are allowed; otherwise must be absolute.
+	if cfg.Defaults.BaseDir != "" && cfg.Defaults.BaseDir != "." && !filepath.IsAbs(cfg.Defaults.BaseDir) {
+		return nil, fmt.Errorf("invalid base_dir %q: must be absolute path, \".\", or empty", cfg.Defaults.BaseDir)
 	}
 
 	return &cfg, nil

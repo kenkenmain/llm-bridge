@@ -107,6 +107,38 @@ func TestParse_Worktrees(t *testing.T) {
 	}
 }
 
+func TestParse_NewRepoManagementCommands(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantCmd  string
+		wantArgs string
+		wantType RouteType
+	}{
+		{"list-repos", "/list-repos", "list-repos", "", RouteToBridge},
+		{"remove-repo", "/remove-repo myrepo", "remove-repo", "myrepo", RouteToBridge},
+		{"clone", "/clone https://github.com/user/repo myrepo", "clone", "https://github.com/user/repo myrepo", RouteToBridge},
+		{"clone with channel", "/clone https://github.com/user/repo myrepo 12345", "clone", "https://github.com/user/repo myrepo 12345", RouteToBridge},
+		{"add-worktree", "/add-worktree feature feature-branch", "add-worktree", "feature feature-branch", RouteToBridge},
+		{"add-worktree with channel", "/add-worktree feature feature-branch 12345", "add-worktree", "feature feature-branch 12345", RouteToBridge},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			route := Parse(tt.input)
+			if route.Type != tt.wantType {
+				t.Errorf("Parse(%q).Type = %v, want %v", tt.input, route.Type, tt.wantType)
+			}
+			if route.Command != tt.wantCmd {
+				t.Errorf("Parse(%q).Command = %q, want %q", tt.input, route.Command, tt.wantCmd)
+			}
+			if route.Args != tt.wantArgs {
+				t.Errorf("Parse(%q).Args = %q, want %q", tt.input, route.Args, tt.wantArgs)
+			}
+		})
+	}
+}
+
 func TestParseCommand(t *testing.T) {
 	tests := []struct {
 		input   string

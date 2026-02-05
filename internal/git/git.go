@@ -2,9 +2,12 @@
 package git
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -190,4 +193,69 @@ func CurrentBranch(dir string) (string, error) {
 func IsGitRepo(dir string) bool {
 	result, err := runGit(dir, "rev-parse", "--is-inside-work-tree")
 	return err == nil && result == "true"
+}
+
+// safeRepoNameRe validates repo/worktree names to prevent path traversal and shell issues.
+// Only allows alphanumeric characters, hyphens, and underscores.
+var safeRepoNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// IsSafeRepoName returns true if the name is safe to use as a repo or worktree name.
+func IsSafeRepoName(name string) bool {
+	return safeRepoNameRe.MatchString(name)
+}
+
+// allowedURLSchemes contains the URL schemes allowed for git clone.
+// Note: http:// is intentionally excluded to enforce encrypted transport.
+var allowedURLSchemes = []string{"https://", "git://", "ssh://", "git@"}
+
+// IsAllowedGitURL returns true if the URL uses an allowed scheme.
+func IsAllowedGitURL(repoURL string) bool {
+	for _, scheme := range allowedURLSchemes {
+		if strings.HasPrefix(repoURL, scheme) {
+			return true
+		}
+	}
+	return false
+}
+
+// CloneRepo clones a git repository from repoURL to destDir.
+// It returns an error if destDir already exists or if the clone fails.
+// Note: URL validation should be done by the caller (e.g., bridge) for security.
+func CloneRepo(repoURL, destDir string) error {
+	// Check if destination already exists.
+	if _, err := os.Stat(destDir); err == nil {
+		return fmt.Errorf("clone repo: destination %q already exists", destDir)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clone repo: check destination: %w", err)
+	}
+
+	// Get the parent directory for running the clone command.
+	parentDir := filepath.Dir(destDir)
+	if parentDir == "" {
+		parentDir = "."
+	}
+
+	_, err := runGit(parentDir, "clone", repoURL, destDir)
+	if err != nil {
+		return fmt.Errorf("clone repo: %w", err)
+	}
+	return nil
+}
+
+// AddWorktree creates a new git worktree at wtDir with a new branch.
+// The -b flag creates a new branch; this will fail if the branch already exists.
+// It returns an error if wtDir already exists or if the worktree creation fails.
+func AddWorktree(repoDir, wtDir, branch string) error {
+	// Check if worktree directory already exists.
+	if _, err := os.Stat(wtDir); err == nil {
+		return fmt.Errorf("add worktree: directory %q already exists", wtDir)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("add worktree: check directory: %w", err)
+	}
+
+	_, err := runGit(repoDir, "worktree", "add", wtDir, "-b", branch)
+	if err != nil {
+		return fmt.Errorf("add worktree: %w", err)
+	}
+	return nil
 }

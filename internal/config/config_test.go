@@ -1174,3 +1174,113 @@ repos:
 		t.Error("expected repo name to contain tab characters")
 	}
 }
+
+func TestDefaults_GetBaseDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseDir string
+		want    string
+	}{
+		{"empty returns default", "", "."},
+		{"absolute path", "/var/repos", "/var/repos"},
+		{"dot returns dot", ".", "."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := Defaults{BaseDir: tt.baseDir}
+			if got := d.GetBaseDir(); got != tt.want {
+				t.Errorf("GetBaseDir() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_BaseDirValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "empty is valid",
+			yaml:    "repos: {}\n",
+			wantErr: "",
+		},
+		{
+			name:    "dot is valid",
+			yaml:    "repos: {}\ndefaults:\n  base_dir: \".\"\n",
+			wantErr: "",
+		},
+		{
+			name:    "absolute path is valid",
+			yaml:    "repos: {}\ndefaults:\n  base_dir: /var/repos\n",
+			wantErr: "",
+		},
+		{
+			name:    "relative path is rejected",
+			yaml:    "repos: {}\ndefaults:\n  base_dir: relative/path\n",
+			wantErr: "invalid base_dir",
+		},
+		{
+			name:    "relative path with dot prefix is rejected",
+			yaml:    "repos: {}\ndefaults:\n  base_dir: ./relative\n",
+			wantErr: "invalid base_dir",
+		},
+		{
+			name:    "relative path parent dir is rejected",
+			yaml:    "repos: {}\ndefaults:\n  base_dir: ../parent\n",
+			wantErr: "invalid base_dir",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("write test config: %v", err)
+			}
+
+			_, err := Load(path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load() unexpected error = %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("Load() expected error")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestLoad_BaseDirValue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `
+repos: {}
+defaults:
+  base_dir: /var/cloned-repos
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Defaults.BaseDir != "/var/cloned-repos" {
+		t.Errorf("BaseDir = %q, want %q", cfg.Defaults.BaseDir, "/var/cloned-repos")
+	}
+	if cfg.Defaults.GetBaseDir() != "/var/cloned-repos" {
+		t.Errorf("GetBaseDir() = %q, want %q", cfg.Defaults.GetBaseDir(), "/var/cloned-repos")
+	}
+}

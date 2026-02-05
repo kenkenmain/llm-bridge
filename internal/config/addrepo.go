@@ -44,3 +44,37 @@ func AddRepo(cfgPath string, name string, repo RepoConfig) error {
 
 	return nil
 }
+
+// RemoveRepo removes a repository from the configuration file at cfgPath.
+// Returns an error if the config file doesn't exist or if the repo doesn't exist.
+// The function does NOT delete any files on disk - it only removes the config entry.
+func RemoveRepo(cfgPath, name string) error {
+	cfg, err := loadRaw(cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if cfg.Repos == nil {
+		return fmt.Errorf("repo %q not found", name)
+	}
+
+	if _, ok := cfg.Repos[name]; !ok {
+		return fmt.Errorf("repo %q not found", name)
+	}
+
+	delete(cfg.Repos, name)
+
+	// No validation required - empty repos map is valid
+	// (user can still add repos later via add-repo command)
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(cfgPath, data, 0600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	return nil
+}

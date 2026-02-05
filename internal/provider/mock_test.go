@@ -129,3 +129,35 @@ func TestMockProvider_SendFileWithError(t *testing.T) {
 		t.Errorf("SendFile() error = %v, want DeadlineExceeded", err)
 	}
 }
+
+func TestMockProvider_SimulateMessage_ChannelFull(t *testing.T) {
+	// Create provider with tiny buffer to trigger full condition
+	m := &MockProvider{
+		name:     "test",
+		messages: make(chan Message, 1),
+	}
+
+	// Fill the channel
+	m.SimulateMessage(Message{Content: "first"})
+
+	// This should hit the default case (channel full) without blocking
+	m.SimulateMessage(Message{Content: "second"})
+
+	// Verify only one message made it through
+	select {
+	case msg := <-m.Messages():
+		if msg.Content != "first" {
+			t.Errorf("expected first message, got %q", msg.Content)
+		}
+	default:
+		t.Error("expected at least one message")
+	}
+
+	// Channel should be empty now
+	select {
+	case <-m.Messages():
+		t.Error("channel should be empty after draining")
+	default:
+		// Expected
+	}
+}

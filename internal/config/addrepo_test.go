@@ -415,3 +415,194 @@ func TestAddRepo_PreservesWorktreeConfig(t *testing.T) {
 		t.Errorf("missing repo %q", "other-repo")
 	}
 }
+
+func TestRemoveRepo_Success(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `repos:
+  repo-a:
+    provider: discord
+    channel_id: "111"
+    llm: claude
+    working_dir: /tmp/a
+  repo-b:
+    provider: discord
+    channel_id: "222"
+    llm: claude
+    working_dir: /tmp/b
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	err := RemoveRepo(path, "repo-a")
+	if err != nil {
+		t.Fatalf("RemoveRepo() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if _, ok := cfg.Repos["repo-a"]; ok {
+		t.Errorf("repo-a should have been removed")
+	}
+	if _, ok := cfg.Repos["repo-b"]; !ok {
+		t.Errorf("repo-b should still exist")
+	}
+	if len(cfg.Repos) != 1 {
+		t.Errorf("len(Repos) = %d, want 1", len(cfg.Repos))
+	}
+}
+
+func TestRemoveRepo_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `repos:
+  existing-repo:
+    provider: discord
+    channel_id: "111"
+    llm: claude
+    working_dir: /tmp/existing
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	err := RemoveRepo(path, "nonexistent-repo")
+	if err == nil {
+		t.Fatal("RemoveRepo() expected error for nonexistent repo")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "not found")
+	}
+
+	// Verify original file is unchanged
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Repos) != 1 {
+		t.Errorf("len(Repos) = %d, want 1 (original file should be unchanged)", len(cfg.Repos))
+	}
+}
+
+func TestRemoveRepo_FileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nonexistent.yaml")
+
+	err := RemoveRepo(path, "any-repo")
+	if err == nil {
+		t.Fatal("RemoveRepo() expected error for nonexistent file")
+	}
+	if !strings.Contains(err.Error(), "load config") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "load config")
+	}
+}
+
+func TestRemoveRepo_EmptyReposMap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	// Config file with no repos section (nil repos map)
+	content := `defaults:
+  llm: claude
+  output_threshold: 1500
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	err := RemoveRepo(path, "any-repo")
+	if err == nil {
+		t.Fatal("RemoveRepo() expected error for nil repos map")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "not found")
+	}
+}
+
+func TestRemoveRepo_LastRepo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `repos:
+  only-repo:
+    provider: discord
+    channel_id: "111"
+    llm: claude
+    working_dir: /tmp/only
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	// Should allow removing the last repo (empty repos map is valid)
+	err := RemoveRepo(path, "only-repo")
+	if err != nil {
+		t.Fatalf("RemoveRepo() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Repos) != 0 {
+		t.Errorf("len(Repos) = %d, want 0", len(cfg.Repos))
+	}
+}
+
+func TestRemoveRepo_PreservesWorktrees(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	// Config with worktree definitions - removing another repo should preserve them
+	content := `repos:
+  myproject:
+    provider: discord
+    channel_id: "111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature
+        path: /code/myproject-feature
+        channel_id: "222"
+  other-repo:
+    provider: discord
+    channel_id: "333"
+    llm: claude
+    working_dir: /tmp/other
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	err := RemoveRepo(path, "other-repo")
+	if err != nil {
+		t.Fatalf("RemoveRepo() error = %v", err)
+	}
+
+	// Verify config is still loadable and worktrees are preserved
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() after RemoveRepo error = %v (worktree preservation issue)", err)
+	}
+
+	// Should have 2 entries: myproject and myproject/feature (expanded by Load)
+	if len(cfg.Repos) != 2 {
+		t.Errorf("len(Repos) = %d, want 2", len(cfg.Repos))
+	}
+	if _, ok := cfg.Repos["myproject"]; !ok {
+		t.Errorf("missing repo %q", "myproject")
+	}
+	if _, ok := cfg.Repos["myproject/feature"]; !ok {
+		t.Errorf("missing expanded worktree repo %q", "myproject/feature")
+	}
+	if _, ok := cfg.Repos["other-repo"]; ok {
+		t.Errorf("other-repo should have been removed")
+	}
+}

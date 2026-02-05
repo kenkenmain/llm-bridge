@@ -1,6 +1,24 @@
 # llm-bridge configuration
 # Copy to llm-bridge.yaml and customize
 
+# ============================================================================
+# MINIMAL CONFIGURATION (Self-Discovery Mode)
+# ============================================================================
+# With just defaults configured, you can start the bridge and use /clone to
+# add repos dynamically. No pre-defined repos required!
+#
+# defaults:
+#   base_dir: /home/user/repos   # where /clone creates new repos
+#   llm: claude
+#
+# providers:
+#   discord:
+#     bot_token: "${DISCORD_BOT_TOKEN}"
+#
+# Then from Discord: /clone https://github.com/user/repo myrepo 123456789
+# ============================================================================
+
+# Pre-defined repos (optional - can also use /clone to add dynamically)
 repos:
   notification-hooks:
     provider: discord
@@ -8,12 +26,27 @@ repos:
     llm: claude
     working_dir: /home/user/projects/notification-hooks
 
+  # Example with worktrees
+  # main-project:
+  #   provider: discord
+  #   channel_id: "234567890123456789"
+  #   working_dir: /home/user/projects/main
+  #   worktrees:
+  #     - name: feature-branch
+  #       path: /home/user/projects/main-feature
+  #       channel_id: "345678901234567890"
+
 defaults:
+  # Base directory for /clone command (repos cloned to base_dir/<name>)
+  # Must be absolute path or "." (defaults to "." if not set)
+  base_dir: /home/user/repos
+
   llm: claude
   claude_path: claude  # or /usr/local/bin/claude for specific version
-  output_threshold: 1500
-  idle_timeout: 10m
-  resume_session: true
+  output_threshold: 1500  # characters before output becomes file attachment
+  idle_timeout: 10m       # stop LLM after this idle period
+  resume_session: true    # resume previous Claude session on restart
+
   rate_limit:
     enabled: true
     user_rate: 0.5       # messages per second per user (1 every 2 seconds)

@@ -42,7 +42,7 @@ var serveCmd = &cobra.Command{
 			cancel()
 		}()
 
-		b := bridge.New(cfg)
+		b := bridge.New(cfg, cfgFile)
 		slog.Info("starting bridge", "config", cfgFile)
 		return b.Start(ctx)
 	},
