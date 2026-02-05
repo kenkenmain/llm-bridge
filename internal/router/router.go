@@ -21,12 +21,16 @@ type Route struct {
 }
 
 var BridgeCommands = map[string]bool{
-	"status":    true,
-	"cancel":    true,
-	"restart":   true,
-	"help":      true,
-	"select":    true,
-	"worktrees": true,
+	"status":       true,
+	"cancel":       true,
+	"restart":      true,
+	"help":         true,
+	"select":       true,
+	"worktrees":    true,
+	"list-repos":   true,
+	"remove-repo":  true,
+	"clone":        true,
+	"add-worktree": true,
 }
 
 func Parse(content string) Route {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +39,7 @@ func testConfig() *config.Config {
 
 func TestNew(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	if b.cfg != cfg {
 		t.Error("config not set")
@@ -55,7 +57,7 @@ func TestNew(t *testing.T) {
 
 func TestBridge_ChannelIDsForProvider(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	ids := b.channelIDsForProvider("discord")
 	if len(ids) != 2 {
@@ -80,7 +82,7 @@ func TestBridge_ChannelIDsForProvider(t *testing.T) {
 
 func TestBridge_RepoForChannel(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	repo := b.repoForChannel("channel-123")
 	if repo != "test-repo" {
@@ -100,7 +102,7 @@ func TestBridge_RepoForChannel(t *testing.T) {
 
 func TestBridge_GetStatus_NoRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	status := b.getStatus("unknown-channel")
 	if status != "No repo configured for this channel" {
@@ -110,7 +112,7 @@ func TestBridge_GetStatus_NoRepo(t *testing.T) {
 
 func TestBridge_GetStatus_NotRunning(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	status := b.getStatus("channel-123")
 	if status != "LLM: not running (repo: test-repo)" {
@@ -120,7 +122,7 @@ func TestBridge_GetStatus_NotRunning(t *testing.T) {
 
 func TestBridge_CancelLLM_NoRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	result := b.cancelLLM("unknown-channel")
 	if result != "No repo configured" {
@@ -130,7 +132,7 @@ func TestBridge_CancelLLM_NoRepo(t *testing.T) {
 
 func TestBridge_CancelLLM_NotRunning(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	result := b.cancelLLM("channel-123")
 	if result != "LLM not running" {
@@ -140,7 +142,7 @@ func TestBridge_CancelLLM_NotRunning(t *testing.T) {
 
 func TestBridge_RestartLLM_NoRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	result := b.restartLLM("unknown-channel")
 	if result != "No repo configured" {
@@ -150,7 +152,7 @@ func TestBridge_RestartLLM_NoRepo(t *testing.T) {
 
 func TestBridge_RestartLLM_NotRunning(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	result := b.restartLLM("channel-123")
 	if result != "LLM stopped. Will restart on next message." {
@@ -160,7 +162,7 @@ func TestBridge_RestartLLM_NotRunning(t *testing.T) {
 
 func TestBridge_GetTerminalRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	// First call auto-selects a repo
 	repo := b.getTerminalRepo()
@@ -183,7 +185,7 @@ func TestBridge_GetTerminalRepo_EmptyConfig(t *testing.T) {
 	cfg := &config.Config{
 		Repos: map[string]config.RepoConfig{},
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	repo := b.getTerminalRepo()
 	if repo != "" {
@@ -193,7 +195,7 @@ func TestBridge_GetTerminalRepo_EmptyConfig(t *testing.T) {
 
 func TestBridge_AddChannelToSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	session := &repoSession{
@@ -218,7 +220,7 @@ func TestBridge_AddChannelToSession(t *testing.T) {
 
 func TestBridge_HandleBridgeCommand_Help(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 
@@ -237,7 +239,7 @@ func TestBridge_HandleBridgeCommand_Help(t *testing.T) {
 
 func TestBridge_Stop(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	b.providers["discord"] = mockProv
@@ -254,7 +256,7 @@ func TestBridge_Stop(t *testing.T) {
 
 func TestBridge_BroadcastOutput_Short(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	session := &repoSession{
@@ -277,7 +279,7 @@ func TestBridge_BroadcastOutput_Short(t *testing.T) {
 func TestBridge_BroadcastOutput_Long(t *testing.T) {
 	cfg := testConfig()
 	cfg.Defaults.OutputThreshold = 10 // Very short threshold for testing
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	session := &repoSession{
@@ -299,7 +301,7 @@ func TestBridge_BroadcastOutput_Long(t *testing.T) {
 
 func TestBridge_BroadcastOutput_Empty(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	session := &repoSession{
@@ -318,7 +320,7 @@ func TestBridge_BroadcastOutput_Empty(t *testing.T) {
 
 func TestBridge_BroadcastOutput_MultipleChannels(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv1 := provider.NewMockProvider("discord")
 	mockProv2 := provider.NewMockProvider("terminal")
@@ -343,7 +345,7 @@ func TestBridge_BroadcastOutput_MultipleChannels(t *testing.T) {
 
 func TestBridge_CheckIdleTimeouts(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	// This test just ensures the function doesn't panic with empty repos
 	b.checkIdleTimeouts(10 * time.Minute)
@@ -353,7 +355,7 @@ func TestBridge_CheckIdleTimeouts(t *testing.T) {
 
 func TestBridge_ProcessMessage_BridgeCommand(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	b.providers["discord"] = mockProv
@@ -375,7 +377,7 @@ func TestBridge_ProcessMessage_BridgeCommand(t *testing.T) {
 
 func TestBridge_HandleBridgeCommand_Status(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	route := router.Route{Type: router.RouteToBridge, Command: "status"}
@@ -392,7 +394,7 @@ func TestBridge_HandleBridgeCommand_Status(t *testing.T) {
 
 func TestBridge_HandleBridgeCommand_Cancel(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	route := router.Route{Type: router.RouteToBridge, Command: "cancel"}
@@ -406,7 +408,7 @@ func TestBridge_HandleBridgeCommand_Cancel(t *testing.T) {
 
 func TestBridge_HandleBridgeCommand_Restart(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	route := router.Route{Type: router.RouteToBridge, Command: "restart"}
@@ -423,7 +425,7 @@ func TestBridge_HandleBridgeCommand_Restart(t *testing.T) {
 
 func TestBridge_HandleBridgeCommand_Unknown(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	route := router.Route{Type: router.RouteToBridge, Command: "foobar"}
@@ -440,7 +442,7 @@ func TestBridge_HandleBridgeCommand_Unknown(t *testing.T) {
 
 func TestBridge_GetStatus_Running(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -461,7 +463,7 @@ func TestBridge_GetStatus_Running(t *testing.T) {
 
 func TestBridge_CancelLLM_Running(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -479,7 +481,7 @@ func TestBridge_CancelLLM_Running(t *testing.T) {
 
 func TestBridge_RestartLLM_Running(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -511,7 +513,7 @@ func TestBridge_RestartLLM_Running(t *testing.T) {
 
 func TestBridge_HandleLLMMessage_NoRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	msg := provider.Message{
@@ -534,7 +536,7 @@ func TestBridge_HandleLLMMessage_NoRepo(t *testing.T) {
 
 func TestBridge_HandleLLMMessage_WithSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -567,7 +569,7 @@ func TestBridge_HandleLLMMessage_WithSession(t *testing.T) {
 
 func TestBridge_HandleLLMMessage_SendError(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -601,7 +603,7 @@ func TestBridge_HandleLLMMessage_SendError(t *testing.T) {
 
 func TestBridge_ProcessMessage_LLMRoute(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -630,7 +632,7 @@ func TestBridge_ProcessMessage_LLMRoute(t *testing.T) {
 
 func TestBridge_ProcessMessage_DoubleColonCommand(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -662,7 +664,7 @@ func TestBridge_ProcessMessage_DoubleColonCommand(t *testing.T) {
 
 func TestBridge_CheckIdleTimeouts_WithIdleSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -702,7 +704,7 @@ func TestBridge_CheckIdleTimeouts_WithIdleSession(t *testing.T) {
 
 func TestBridge_CheckIdleTimeouts_ActiveSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -725,7 +727,7 @@ func TestBridge_CheckIdleTimeouts_ActiveSession(t *testing.T) {
 
 func TestBridge_HandleMessages_ContextCancel(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -748,7 +750,7 @@ func TestBridge_HandleMessages_ContextCancel(t *testing.T) {
 
 func TestBridge_HandleMessages_ChannelClosed(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	ctx := context.Background()
@@ -771,7 +773,7 @@ func TestBridge_HandleMessages_ChannelClosed(t *testing.T) {
 
 func TestBridge_Stop_WithSessions(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -802,7 +804,7 @@ func TestBridge_Stop_WithSessions(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_SelectNoArgs(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 	// Override writer to capture output
@@ -818,7 +820,7 @@ func TestBridge_ProcessTerminalMessage_SelectNoArgs(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_SelectUnknownRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 	msg := provider.Message{
@@ -833,7 +835,7 @@ func TestBridge_ProcessTerminalMessage_SelectUnknownRepo(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_SelectValidRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 	msg := provider.Message{
@@ -857,7 +859,7 @@ func TestBridge_ProcessTerminalMessage_NoRepos(t *testing.T) {
 	cfg := &config.Config{
 		Repos: map[string]config.RepoConfig{},
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 	msg := provider.Message{
@@ -872,7 +874,7 @@ func TestBridge_ProcessTerminalMessage_NoRepos(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_BridgeCommand(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 	msg := provider.Message{
@@ -887,7 +889,7 @@ func TestBridge_ProcessTerminalMessage_BridgeCommand(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_LLMRoute(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -917,7 +919,7 @@ func TestBridge_ProcessTerminalMessage_LLMRoute(t *testing.T) {
 
 func TestBridge_GetOrCreateSession_NewSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
@@ -941,7 +943,7 @@ func TestBridge_GetOrCreateSession_NewSession(t *testing.T) {
 
 func TestBridge_GetOrCreateSession_ExistingSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -966,7 +968,7 @@ func TestBridge_GetOrCreateSession_ExistingSession(t *testing.T) {
 
 func TestBridge_GetOrCreateSession_FactoryError(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
 		return nil, fmt.Errorf("factory error")
@@ -983,7 +985,7 @@ func TestBridge_GetOrCreateSession_FactoryError(t *testing.T) {
 
 func TestBridge_HandleLLMMessage_CreatesSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
@@ -1008,7 +1010,7 @@ func TestBridge_HandleLLMMessage_CreatesSession(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_CreatesSession(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 	b.terminalRepoName = "test-repo"
 
 	mockLLM := newMockLLM("claude")
@@ -1033,7 +1035,7 @@ func TestBridge_ProcessTerminalMessage_CreatesSession(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_SessionCreateError(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 	b.terminalRepoName = "test-repo"
 
 	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
@@ -1057,7 +1059,7 @@ func TestBridge_Start_NoProviders(t *testing.T) {
 		Repos:    map[string]config.RepoConfig{},
 		Defaults: config.Defaults{IdleTimeout: "10m"},
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -1071,7 +1073,7 @@ func TestBridge_Start_NoProviders(t *testing.T) {
 
 func TestBridge_Start_WithTerminal(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -1091,7 +1093,7 @@ func TestBridge_Start_WithDiscord(t *testing.T) {
 	cfg := testConfig()
 	cfg.Providers.Discord.BotToken = "test-token"
 
-	b := New(cfg)
+	b := New(cfg, "")
 
 	// Inject mock discord factory
 	mockDiscord := provider.NewMockProvider("discord")
@@ -1121,7 +1123,7 @@ func TestBridge_Start_NoTokenSkipsDiscord(t *testing.T) {
 	// BotToken empty, no default — Discord should not start
 
 	discordFactoryCalled := false
-	b := New(cfg)
+	b := New(cfg, "")
 	b.discordFactory = func(token string, channelIDs []string) provider.Provider {
 		discordFactoryCalled = true
 		return provider.NewMockProvider("discord")
@@ -1141,7 +1143,7 @@ func TestBridge_Start_DiscordError(t *testing.T) {
 	cfg := testConfig()
 	cfg.Providers.Discord.BotToken = "test-token"
 
-	b := New(cfg)
+	b := New(cfg, "")
 
 	// Inject mock discord factory that returns error
 	mockDiscord := provider.NewMockProvider("discord")
@@ -1171,7 +1173,7 @@ func TestBridge_Start_NoChannelsForDiscord(t *testing.T) {
 		cfg.Repos[name] = repo
 	}
 
-	b := New(cfg)
+	b := New(cfg, "")
 
 	// Discord factory should not be called since no channels use discord
 	discordFactoryCalled := false
@@ -1193,7 +1195,7 @@ func TestBridge_Start_NoChannelsForDiscord(t *testing.T) {
 // Tests for handleTerminalMessages
 func TestBridge_HandleTerminalMessages_ContextCancel(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1216,7 +1218,7 @@ func TestBridge_HandleTerminalMessages_ContextCancel(t *testing.T) {
 
 func TestBridge_HandleTerminalMessages_ChannelClosed(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 	ctx := context.Background()
@@ -1241,7 +1243,7 @@ func TestBridge_HandleTerminalMessages_ChannelClosed(t *testing.T) {
 func TestBridge_IdleTimeoutLoop_ContextCancel(t *testing.T) {
 	cfg := testConfig()
 	cfg.Defaults.IdleTimeout = "1ms" // Very short for testing
-	b := New(cfg)
+	b := New(cfg, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1264,7 +1266,7 @@ func TestBridge_IdleTimeoutLoop_ContextCancel(t *testing.T) {
 // Tests for readOutput
 func TestBridge_ReadOutput_NilOutput(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	// Output returns nil by default
@@ -1291,7 +1293,7 @@ func TestBridge_ReadOutput_NilOutput(t *testing.T) {
 
 func TestBridge_ReadOutput_WithOutput(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1337,7 +1339,7 @@ func TestBridge_ReadOutput_WithOutput(t *testing.T) {
 func TestBridge_ReadOutput_BufferFlush(t *testing.T) {
 	cfg := testConfig()
 	cfg.Defaults.OutputThreshold = 10 // Very small threshold
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1378,7 +1380,7 @@ func TestBridge_ReadOutput_BufferFlush(t *testing.T) {
 func TestBridge_New_InitializesLimiters(t *testing.T) {
 	cfg := testConfig()
 	// Default config has rate limiting enabled (nil Enabled defaults to true)
-	b := New(cfg)
+	b := New(cfg, "")
 
 	if b.userLimiter == nil {
 		t.Error("userLimiter should be initialized when rate limiting is enabled")
@@ -1392,7 +1394,7 @@ func TestBridge_New_LimitersNilWhenDisabled(t *testing.T) {
 	cfg := testConfig()
 	disabled := false
 	cfg.Defaults.RateLimit.Enabled = &disabled
-	b := New(cfg)
+	b := New(cfg, "")
 
 	if b.userLimiter != nil {
 		t.Error("userLimiter should be nil when rate limiting is disabled")
@@ -1410,7 +1412,7 @@ func TestBridge_RateLimitedUser(t *testing.T) {
 		ChannelRate:  100,  // high channel limit so it doesn't interfere
 		ChannelBurst: 100,
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1477,7 +1479,7 @@ func TestBridge_RateLimitedChannel(t *testing.T) {
 		ChannelRate:  0.1, // very slow refill
 		ChannelBurst: 1,   // only 1 allowed per channel
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1539,7 +1541,7 @@ func TestBridge_RateLimitBypassBridgeCommands(t *testing.T) {
 		ChannelRate:  0.001,
 		ChannelBurst: 0,
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	ctx := context.Background()
@@ -1579,7 +1581,7 @@ func TestBridge_RateLimitDisabled(t *testing.T) {
 		ChannelRate:  0.001,
 		ChannelBurst: 0,
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1628,7 +1630,7 @@ func TestBridge_RateLimitTerminalBypass(t *testing.T) {
 		ChannelRate:  100,   // high channel rate
 		ChannelBurst: 100,
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 
@@ -1656,7 +1658,7 @@ func TestBridge_RateLimitDifferentUsersIndependent(t *testing.T) {
 		ChannelRate:  100, // high channel limit
 		ChannelBurst: 100,
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1716,7 +1718,7 @@ func TestBridge_IsRateLimited_NilLimiters(t *testing.T) {
 	cfg := testConfig()
 	disabled := false
 	cfg.Defaults.RateLimit.Enabled = &disabled
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 	msg := provider.Message{
@@ -1733,7 +1735,7 @@ func TestBridge_IsRateLimited_NilLimiters(t *testing.T) {
 
 func TestBridge_GetStatus_RunningWithGitInfo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1761,7 +1763,7 @@ func TestBridge_GetStatus_RunningWithGitInfo(t *testing.T) {
 
 func TestBridge_GetStatus_RunningWithWorktreeGitInfo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1789,7 +1791,7 @@ func TestBridge_GetStatus_RunningWithWorktreeGitInfo(t *testing.T) {
 
 func TestBridge_GetStatus_RunningWithoutGitInfo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -1814,7 +1816,7 @@ func TestBridge_GetStatus_RunningWithoutGitInfo(t *testing.T) {
 
 func TestBridge_GetOrCreateSession_DetectsGit(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
@@ -1855,7 +1857,7 @@ func TestBridge_GetOrCreateSession_DetectsGit(t *testing.T) {
 
 func TestBridge_GetOrCreateSession_GitDetectionFailure(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
@@ -1885,7 +1887,7 @@ func TestBridge_GetOrCreateSession_GitDetectionFailure(t *testing.T) {
 
 func TestBridge_HandleBridgeCommand_Worktrees_NoRepo(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 
@@ -1907,7 +1909,7 @@ func TestBridge_HandleBridgeCommand_Worktrees_NoRepo(t *testing.T) {
 
 func TestBridge_ListWorktrees_WithWorktrees(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
 		return []git.WorktreeInfo{
@@ -1941,7 +1943,7 @@ func TestBridge_ListWorktrees_WithWorktrees(t *testing.T) {
 
 func TestBridge_ListWorktrees_GitError(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
 		return nil, fmt.Errorf("not a git repository")
@@ -1962,7 +1964,7 @@ func TestBridge_ListWorktrees_GitError(t *testing.T) {
 
 func TestBridge_ListWorktrees_NoLinkedWorktrees(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
 		return []git.WorktreeInfo{
@@ -1992,7 +1994,7 @@ func TestBridge_ListWorktrees_WithConfiguredRepo(t *testing.T) {
 		LLM:        "claude",
 		WorkingDir: "/tmp/test-feature",
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
 		return []git.WorktreeInfo{
@@ -2022,7 +2024,7 @@ func TestBridge_ListWorktrees_WithActiveSession(t *testing.T) {
 		LLM:        "claude",
 		WorkingDir: "/tmp/test-feature",
 	}
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
 	mockLLM.setRunning(true)
@@ -2053,7 +2055,7 @@ func TestBridge_ListWorktrees_WithActiveSession(t *testing.T) {
 
 func TestBridge_ListWorktrees_UnconfiguredWorktree(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	b.worktreeLister = func(dir string) ([]git.WorktreeInfo, error) {
 		return []git.WorktreeInfo{
@@ -2077,7 +2079,7 @@ func TestBridge_ListWorktrees_UnconfiguredWorktree(t *testing.T) {
 
 func TestBridge_HandleBridgeCommand_Help_IncludesWorktrees(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	mockProv := provider.NewMockProvider("discord")
 
@@ -2126,7 +2128,7 @@ func testConfigWithWorktrees() *config.Config {
 
 func TestBridge_ChannelIDsForProvider_WithWorktreeRepos(t *testing.T) {
 	cfg := testConfigWithWorktrees()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	discordIDs := b.channelIDsForProvider("discord")
 	if len(discordIDs) != 2 {
@@ -2152,7 +2154,7 @@ func TestBridge_ChannelIDsForProvider_WithWorktreeRepos(t *testing.T) {
 
 func TestBridge_RepoForChannel_WorktreeChild(t *testing.T) {
 	cfg := testConfigWithWorktrees()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	repo := b.repoForChannel("channel-100")
 	if repo != "myproject" {
@@ -2172,7 +2174,7 @@ func TestBridge_RepoForChannel_WorktreeChild(t *testing.T) {
 
 func TestBridge_HandleLLMMessage_WorktreeChildChannel(t *testing.T) {
 	cfg := testConfigWithWorktrees()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	var capturedWorkDir string
 	mockLLM := newMockLLM("claude")
@@ -2218,7 +2220,7 @@ func TestBridge_Start_WithDiscord_WorktreeChannels(t *testing.T) {
 	cfg := testConfigWithWorktrees()
 	cfg.Providers.Discord.BotToken = "test-token"
 
-	b := New(cfg)
+	b := New(cfg, "")
 
 	var capturedChannelIDs []string
 	mockDiscord := provider.NewMockProvider("discord")
@@ -2250,7 +2252,7 @@ func TestBridge_Start_WithDiscord_WorktreeChannels(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_SelectPathTraversal(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 
@@ -2289,7 +2291,7 @@ func TestBridge_ProcessTerminalMessage_SelectPathTraversal(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_SelectVeryLong(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 
@@ -2318,7 +2320,7 @@ func TestBridge_ProcessTerminalMessage_SelectVeryLong(t *testing.T) {
 
 func TestBridge_ProcessTerminalMessage_SelectWhitespaceOnly(t *testing.T) {
 	cfg := testConfig()
-	b := New(cfg)
+	b := New(cfg, "")
 
 	term := provider.NewTerminal("terminal")
 
@@ -2342,4 +2344,1361 @@ func TestBridge_ProcessTerminalMessage_SelectWhitespaceOnly(t *testing.T) {
 	}
 
 	// Test passes if no panics occurred - whitespace args should be handled gracefully
+}
+
+func TestBridge_HandleListRepos_NoRepos(t *testing.T) {
+	cfg := &config.Config{
+		Repos:    map[string]config.RepoConfig{},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+	b.handleBridgeCommand(mockProv, "any-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Content != "No repos configured" {
+		t.Errorf("expected 'No repos configured', got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_HandleListRepos_SingleRepo(t *testing.T) {
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"my-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-123",
+				LLM:        "claude",
+				WorkingDir: "/home/user/projects/my-repo",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+	b.handleBridgeCommand(mockProv, "any-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Configured repos:") {
+		t.Errorf("expected header 'Configured repos:', got %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "my-repo") {
+		t.Errorf("expected repo name 'my-repo', got %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "channel-123") {
+		t.Errorf("expected channel ID, got %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "inactive") {
+		t.Errorf("expected 'inactive' status, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_HandleListRepos_MultipleRepos_Sorted(t *testing.T) {
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"zebra-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-3",
+				WorkingDir: "/tmp/zebra",
+			},
+			"alpha-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-1",
+				WorkingDir: "/tmp/alpha",
+			},
+			"beta-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-2",
+				WorkingDir: "/tmp/beta",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+	b.handleBridgeCommand(mockProv, "any-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	content := msgs[0].Content
+	// Verify alphabetical sorting: alpha should come before beta, beta before zebra
+	alphaIdx := strings.Index(content, "alpha-repo")
+	betaIdx := strings.Index(content, "beta-repo")
+	zebraIdx := strings.Index(content, "zebra-repo")
+
+	if alphaIdx == -1 || betaIdx == -1 || zebraIdx == -1 {
+		t.Errorf("missing expected repo names in output: %q", content)
+	}
+	if alphaIdx > betaIdx || betaIdx > zebraIdx {
+		t.Errorf("repos not sorted alphabetically, got %q", content)
+	}
+}
+
+func TestBridge_HandleListRepos_WithActiveSession(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	b.repos["test-repo"] = &repoSession{
+		name: "test-repo",
+		llm:  mockLLM,
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+	b.handleBridgeCommand(mockProv, "any-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	content := msgs[0].Content
+	// test-repo should show as active
+	if !strings.Contains(content, "test-repo") {
+		t.Errorf("expected 'test-repo' in output, got %q", content)
+	}
+
+	// Find the line for test-repo and check it says "active"
+	lines := strings.Split(content, "\n")
+	foundTestRepo := false
+	for _, line := range lines {
+		if strings.Contains(line, "test-repo") {
+			foundTestRepo = true
+			if !strings.Contains(line, "active") {
+				t.Errorf("expected test-repo line to show 'active', got %q", line)
+			}
+		}
+	}
+	if !foundTestRepo {
+		t.Errorf("test-repo line not found in output: %q", content)
+	}
+}
+
+func TestBridge_HandleListRepos_LongWorkingDir_Truncated(t *testing.T) {
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"my-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-123",
+				WorkingDir: "/home/user/very/long/path/that/exceeds/thirty/characters/definitely",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+	b.handleBridgeCommand(mockProv, "any-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	content := msgs[0].Content
+	// Should contain truncation marker "..."
+	if !strings.Contains(content, "...") {
+		t.Errorf("expected truncated path with '...', got %q", content)
+	}
+	// Should NOT contain the full path
+	if strings.Contains(content, "/home/user/very/long/path") {
+		t.Errorf("expected truncated path, but found full path in output: %q", content)
+	}
+}
+
+func TestBridge_HandleListRepos_WithBranch(t *testing.T) {
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"my-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-123",
+				WorkingDir: "/tmp/my-repo",
+				Branch:     "feature/test",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+	b.handleBridgeCommand(mockProv, "any-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	content := msgs[0].Content
+	if !strings.Contains(content, "branch: feature/test") {
+		t.Errorf("expected 'branch: feature/test' in output, got %q", content)
+	}
+}
+
+func TestBridge_HandleListRepos_WorksFromAnyChannel(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+
+	// Call from a channel that is not configured for any repo
+	b.handleBridgeCommand(mockProv, "unknown-channel-xyz", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	// Should still list repos even from an unconfigured channel
+	if !strings.Contains(msgs[0].Content, "Configured repos:") {
+		t.Errorf("expected repos list from any channel, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_HandleListRepos_BulletListFormat(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "list-repos"}
+	b.handleBridgeCommand(mockProv, "any-channel", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	content := msgs[0].Content
+	lines := strings.Split(content, "\n")
+
+	// First line should be header
+	if !strings.HasPrefix(lines[0], "Configured repos:") {
+		t.Errorf("expected first line to be header, got %q", lines[0])
+	}
+
+	// Each subsequent line should start with "- "
+	for i, line := range lines[1:] {
+		if !strings.HasPrefix(line, "- ") {
+			t.Errorf("line %d should start with '- ', got %q", i+1, line)
+		}
+	}
+}
+
+func TestBridge_HandleBridgeCommand_Help_IncludesListRepos(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "help"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "/list-repos") {
+		t.Errorf("expected '/list-repos' in help output, got %q", msgs[0].Content)
+	}
+}
+
+func TestBridge_GitFactoryInjection(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	// Verify defaults are set
+	if b.cloneRepo == nil {
+		t.Error("cloneRepo should be initialized by default")
+	}
+	if b.addWorktree == nil {
+		t.Error("addWorktree should be initialized by default")
+	}
+
+	// Test that factory fields can be overridden (mock injection pattern)
+	cloneRepoCalled := false
+	addWorktreeCalled := false
+
+	b.cloneRepo = func(url, destDir string) error {
+		cloneRepoCalled = true
+		if url != "https://example.com/repo.git" {
+			t.Errorf("cloneRepo url = %q, want https://example.com/repo.git", url)
+		}
+		if destDir != "/tmp/dest" {
+			t.Errorf("cloneRepo destDir = %q, want /tmp/dest", destDir)
+		}
+		return nil
+	}
+
+	b.addWorktree = func(repoDir, wtDir, branch string) error {
+		addWorktreeCalled = true
+		if repoDir != "/tmp/repo" {
+			t.Errorf("addWorktree repoDir = %q, want /tmp/repo", repoDir)
+		}
+		if wtDir != "/tmp/worktree" {
+			t.Errorf("addWorktree wtDir = %q, want /tmp/worktree", wtDir)
+		}
+		if branch != "feature-branch" {
+			t.Errorf("addWorktree branch = %q, want feature-branch", branch)
+		}
+		return nil
+	}
+
+	// Call the overridden functions
+	err := b.cloneRepo("https://example.com/repo.git", "/tmp/dest")
+	if err != nil {
+		t.Errorf("cloneRepo returned error: %v", err)
+	}
+	if !cloneRepoCalled {
+		t.Error("cloneRepo mock was not called")
+	}
+
+	err = b.addWorktree("/tmp/repo", "/tmp/worktree", "feature-branch")
+	if err != nil {
+		t.Errorf("addWorktree returned error: %v", err)
+	}
+	if !addWorktreeCalled {
+		t.Error("addWorktree mock was not called")
+	}
+}
+
+// Tests for RuntimeAddRepo
+func TestBridge_RuntimeAddRepo_Success(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	repo := config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-999",
+		LLM:        "claude",
+		WorkingDir: "/tmp/newrepo",
+	}
+
+	err := b.RuntimeAddRepo("new-repo", repo)
+	if err != nil {
+		t.Fatalf("RuntimeAddRepo() error = %v", err)
+	}
+
+	// Verify memory was updated
+	b.mu.Lock()
+	storedRepo, ok := b.cfg.Repos["new-repo"]
+	b.mu.Unlock()
+
+	if !ok {
+		t.Fatal("repo 'new-repo' not found in memory")
+	}
+	if storedRepo.ChannelID != "channel-999" {
+		t.Errorf("storedRepo.ChannelID = %q, want %q", storedRepo.ChannelID, "channel-999")
+	}
+
+	// Verify file was persisted
+	loadedCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	loadedRepo, ok := loadedCfg.Repos["new-repo"]
+	if !ok {
+		t.Fatal("repo 'new-repo' not found in persisted config")
+	}
+	if loadedRepo.ChannelID != "channel-999" {
+		t.Errorf("loadedRepo.ChannelID = %q, want %q", loadedRepo.ChannelID, "channel-999")
+	}
+}
+
+func TestBridge_RuntimeAddRepo_DuplicateChannelID_Error(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"existing-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-111",
+				LLM:        "claude",
+				WorkingDir: "/tmp/existing",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	// Pre-persist the initial config so config.AddRepo can load it
+	err := config.AddRepo(cfgPath, "existing-repo", cfg.Repos["existing-repo"])
+	if err != nil {
+		t.Fatalf("failed to create initial config: %v", err)
+	}
+
+	// Try to add a repo with a duplicate channel ID
+	repo := config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-111", // duplicate
+		LLM:        "claude",
+		WorkingDir: "/tmp/newrepo",
+	}
+
+	err = b.RuntimeAddRepo("new-repo", repo)
+	if err == nil {
+		t.Fatal("RuntimeAddRepo() expected error for duplicate channel_id")
+	}
+	if !strings.Contains(err.Error(), "duplicate channel_id") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "duplicate channel_id")
+	}
+
+	// Verify memory was NOT updated (existing repo should be unchanged, new repo should NOT exist)
+	b.mu.Lock()
+	_, newRepoExists := b.cfg.Repos["new-repo"]
+	existingRepo, existingOK := b.cfg.Repos["existing-repo"]
+	b.mu.Unlock()
+
+	if newRepoExists {
+		t.Error("new-repo should NOT have been added to memory on error")
+	}
+	if !existingOK {
+		t.Error("existing-repo should still be in memory")
+	}
+	if existingOK && existingRepo.ChannelID != "channel-111" {
+		t.Errorf("existing-repo was modified unexpectedly")
+	}
+}
+
+func TestBridge_RuntimeAddRepo_FileWriteError(t *testing.T) {
+	// Use a path that will fail to write (non-existent directory)
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "/nonexistent/path/to/config.yaml")
+
+	repo := config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-999",
+		LLM:        "claude",
+		WorkingDir: "/tmp/newrepo",
+	}
+
+	err := b.RuntimeAddRepo("new-repo", repo)
+	if err == nil {
+		t.Fatal("RuntimeAddRepo() expected error for file write failure")
+	}
+
+	// Verify memory was NOT updated
+	b.mu.Lock()
+	_, exists := b.cfg.Repos["new-repo"]
+	b.mu.Unlock()
+
+	if exists {
+		t.Error("repo should NOT have been added to memory on file write error")
+	}
+}
+
+func TestBridge_RuntimeAddRepo_ExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"existing-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-111",
+				LLM:        "claude",
+				WorkingDir: "/tmp/existing",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	// Pre-persist the initial config
+	err := config.AddRepo(cfgPath, "existing-repo", cfg.Repos["existing-repo"])
+	if err != nil {
+		t.Fatalf("failed to create initial config: %v", err)
+	}
+
+	// Add a new repo with a different channel
+	repo := config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-222",
+		LLM:        "claude",
+		WorkingDir: "/tmp/newrepo",
+	}
+
+	err = b.RuntimeAddRepo("new-repo", repo)
+	if err != nil {
+		t.Fatalf("RuntimeAddRepo() error = %v", err)
+	}
+
+	// Verify both repos exist in memory
+	b.mu.Lock()
+	_, existingOK := b.cfg.Repos["existing-repo"]
+	_, newOK := b.cfg.Repos["new-repo"]
+	b.mu.Unlock()
+
+	if !existingOK {
+		t.Error("existing-repo should still be in memory")
+	}
+	if !newOK {
+		t.Error("new-repo should be in memory")
+	}
+
+	// Verify both repos exist in persisted config
+	loadedCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	if _, ok := loadedCfg.Repos["existing-repo"]; !ok {
+		t.Error("existing-repo should be in persisted config")
+	}
+	if _, ok := loadedCfg.Repos["new-repo"]; !ok {
+		t.Error("new-repo should be in persisted config")
+	}
+}
+
+func TestBridge_RuntimeAddRepo_NilReposMap(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+
+	// Create a config with nil Repos map
+	cfg := &config.Config{
+		Repos:    nil,
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	repo := config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-999",
+		LLM:        "claude",
+		WorkingDir: "/tmp/newrepo",
+	}
+
+	err := b.RuntimeAddRepo("new-repo", repo)
+	if err != nil {
+		t.Fatalf("RuntimeAddRepo() error = %v", err)
+	}
+
+	// Verify memory was updated and Repos map was initialized
+	b.mu.Lock()
+	if b.cfg.Repos == nil {
+		t.Error("Repos map should have been initialized")
+	}
+	storedRepo, ok := b.cfg.Repos["new-repo"]
+	b.mu.Unlock()
+
+	if !ok {
+		t.Fatal("repo 'new-repo' not found in memory")
+	}
+	if storedRepo.ChannelID != "channel-999" {
+		t.Errorf("storedRepo.ChannelID = %q, want %q", storedRepo.ChannelID, "channel-999")
+	}
+}
+
+func TestBridge_HandleRemoveRepo_NoArgs(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	result := b.handleRemoveRepo("")
+	if result != "Usage: /remove-repo <repo-name>" {
+		t.Errorf("expected usage message, got %q", result)
+	}
+}
+
+func TestBridge_HandleRemoveRepo_NotFound(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	result := b.handleRemoveRepo("nonexistent-repo")
+	if !strings.Contains(result, "not found") {
+		t.Errorf("expected 'not found' in response, got %q", result)
+	}
+}
+
+func TestBridge_HandleRemoveRepo_StopsSessionAndRemovesFromMemory(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	// Write a config file with two repos
+	content := `repos:
+  test-repo:
+    provider: discord
+    channel_id: "channel-123"
+    llm: claude
+    working_dir: /tmp/test
+  other-repo:
+    provider: discord
+    channel_id: "channel-456"
+    llm: claude
+    working_dir: /tmp/other
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := testConfig()
+	b := New(cfg, cfgPath)
+
+	mockLLM := newMockLLM("claude")
+	mockLLM.setRunning(true)
+	cancelled := false
+
+	b.repos["test-repo"] = &repoSession{
+		name:      "test-repo",
+		llm:       mockLLM,
+		cancelCtx: func() { cancelled = true },
+	}
+
+	result := b.handleRemoveRepo("test-repo")
+	if !strings.Contains(result, "Removed repo") {
+		t.Errorf("expected success message, got %q", result)
+	}
+	if !strings.Contains(result, "files on disk were not deleted") {
+		t.Errorf("expected safety notice, got %q", result)
+	}
+
+	// Verify session was stopped
+	if mockLLM.Running() {
+		t.Error("LLM should have been stopped")
+	}
+	if !cancelled {
+		t.Error("cancelCtx should have been called")
+	}
+
+	// Verify session was removed from b.repos
+	b.mu.Lock()
+	_, sessionExists := b.repos["test-repo"]
+	b.mu.Unlock()
+	if sessionExists {
+		t.Error("session should have been removed from b.repos")
+	}
+
+	// Verify repo was removed from memory
+	b.mu.Lock()
+	_, repoExists := b.cfg.Repos["test-repo"]
+	b.mu.Unlock()
+	if repoExists {
+		t.Error("repo should have been removed from b.cfg.Repos")
+	}
+}
+
+func TestBridge_HandleRemoveRepo_NoActiveSession(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `repos:
+  test-repo:
+    provider: discord
+    channel_id: "channel-123"
+    llm: claude
+    working_dir: /tmp/test
+  other-repo:
+    provider: discord
+    channel_id: "channel-456"
+    llm: claude
+    working_dir: /tmp/other
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := testConfig()
+	b := New(cfg, cfgPath)
+
+	// No active session - test-repo exists in config but not in b.repos
+	result := b.handleRemoveRepo("test-repo")
+	if !strings.Contains(result, "Removed repo") {
+		t.Errorf("expected success message, got %q", result)
+	}
+
+	// Verify repo was removed from memory
+	b.mu.Lock()
+	_, repoExists := b.cfg.Repos["test-repo"]
+	b.mu.Unlock()
+	if repoExists {
+		t.Error("repo should have been removed from b.cfg.Repos")
+	}
+}
+
+func TestBridge_HandleRemoveRepo_UpdatesConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `repos:
+  test-repo:
+    provider: discord
+    channel_id: "channel-123"
+    llm: claude
+    working_dir: /tmp/test
+  other-repo:
+    provider: discord
+    channel_id: "channel-456"
+    llm: claude
+    working_dir: /tmp/other
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := testConfig()
+	b := New(cfg, cfgPath)
+
+	result := b.handleRemoveRepo("test-repo")
+	if !strings.Contains(result, "Removed repo") {
+		t.Fatalf("expected success message, got %q", result)
+	}
+
+	// Reload config from file and verify removal persisted
+	reloadedCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if _, ok := reloadedCfg.Repos["test-repo"]; ok {
+		t.Error("test-repo should not exist in reloaded config")
+	}
+	if _, ok := reloadedCfg.Repos["other-repo"]; !ok {
+		t.Error("other-repo should still exist in reloaded config")
+	}
+}
+
+func TestBridge_HandleBridgeCommand_RemoveRepo(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `repos:
+  test-repo:
+    provider: discord
+    channel_id: "channel-123"
+    llm: claude
+    working_dir: /tmp/test
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := testConfig()
+	b := New(cfg, cfgPath)
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "remove-repo", Args: "test-repo"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Removed repo") {
+		t.Errorf("expected success message, got %q", msgs[0].Content)
+	}
+}
+
+// Tests for handleClone
+
+func TestBridge_HandleClone_MissingArgs(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	tests := []struct {
+		name string
+		args string
+	}{
+		{"empty", ""},
+		{"url only", "https://github.com/example/repo"},
+		{"whitespace only", "   "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := b.handleClone("discord", tt.args)
+			if result != "Usage: /clone <url> <name> [channel-id]" {
+				t.Errorf("expected usage message, got %q", result)
+			}
+		})
+	}
+}
+
+func TestBridge_HandleClone_PathTraversal(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	// Names with special characters are rejected by IsSafeRepoName
+	result := b.handleClone("discord", "https://github.com/example/repo ../../../etc/passwd 123")
+	if !strings.Contains(result, "must contain only letters, numbers, hyphens, and underscores") {
+		t.Errorf("expected safe name error, got %q", result)
+	}
+
+	result = b.handleClone("terminal", "https://github.com/example/repo foo/../bar")
+	if !strings.Contains(result, "must contain only letters, numbers, hyphens, and underscores") {
+		t.Errorf("expected safe name error, got %q", result)
+	}
+}
+
+func TestBridge_HandleClone_DiscordRequiresChannelID(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	// Mock cloneRepo to avoid actual cloning
+	b.cloneRepo = func(url, destDir string) error {
+		return nil
+	}
+
+	result := b.handleClone("discord", "https://github.com/example/repo myrepo")
+	if !strings.Contains(result, "channel-id is required for Discord") {
+		t.Errorf("expected channel-id required error, got %q", result)
+	}
+}
+
+func TestBridge_HandleClone_TerminalDefaultsChannelID(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	cloneCalled := false
+	b.cloneRepo = func(url, destDir string) error {
+		cloneCalled = true
+		if url != "https://github.com/example/repo" {
+			t.Errorf("unexpected url: %q", url)
+		}
+		return nil
+	}
+
+	result := b.handleClone("terminal", "https://github.com/example/repo myrepo")
+	if !cloneCalled {
+		t.Error("cloneRepo mock was not called")
+	}
+	if !strings.Contains(result, "Cloned and registered repo") {
+		t.Errorf("expected success message, got %q", result)
+	}
+	if !strings.Contains(result, "terminal-myrepo") {
+		t.Errorf("expected default channel-id 'terminal-myrepo' in response, got %q", result)
+	}
+}
+
+func TestBridge_HandleClone_CloneError(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	b.cloneRepo = func(url, destDir string) error {
+		return fmt.Errorf("git clone failed")
+	}
+
+	result := b.handleClone("discord", "https://github.com/example/repo myrepo channel-999")
+	// Error message is sanitized to avoid exposing paths
+	if !strings.Contains(result, "Clone failed") {
+		t.Errorf("expected clone failed message, got %q", result)
+	}
+}
+
+func TestBridge_HandleClone_Success_Discord(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	var clonedURL, clonedDir string
+	b.cloneRepo = func(url, destDir string) error {
+		clonedURL = url
+		clonedDir = destDir
+		return nil
+	}
+
+	result := b.handleClone("discord", "https://github.com/example/repo myrepo channel-999")
+
+	// Verify clone was called with correct args
+	if clonedURL != "https://github.com/example/repo" {
+		t.Errorf("cloned URL = %q, want %q", clonedURL, "https://github.com/example/repo")
+	}
+	expectedDir := filepath.Join(".", "myrepo") // default base_dir is "."
+	if clonedDir != expectedDir {
+		t.Errorf("cloned dir = %q, want %q", clonedDir, expectedDir)
+	}
+
+	// Verify success message
+	if !strings.Contains(result, "Cloned and registered repo") {
+		t.Errorf("expected success message, got %q", result)
+	}
+	if !strings.Contains(result, "myrepo") {
+		t.Errorf("expected repo name in message, got %q", result)
+	}
+	if !strings.Contains(result, "channel-999") {
+		t.Errorf("expected channel-id in message, got %q", result)
+	}
+
+	// Verify repo was added to memory
+	b.mu.Lock()
+	repo, ok := b.cfg.Repos["myrepo"]
+	b.mu.Unlock()
+	if !ok {
+		t.Fatal("repo was not added to memory")
+	}
+	if repo.Provider != "discord" {
+		t.Errorf("repo.Provider = %q, want %q", repo.Provider, "discord")
+	}
+	if repo.ChannelID != "channel-999" {
+		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "channel-999")
+	}
+}
+
+func TestBridge_HandleClone_Success_Terminal(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	b.cloneRepo = func(url, destDir string) error {
+		return nil
+	}
+
+	result := b.handleClone("terminal", "https://github.com/example/repo myrepo my-channel")
+
+	if !strings.Contains(result, "Cloned and registered repo") {
+		t.Errorf("expected success message, got %q", result)
+	}
+
+	b.mu.Lock()
+	repo, ok := b.cfg.Repos["myrepo"]
+	b.mu.Unlock()
+	if !ok {
+		t.Fatal("repo was not added to memory")
+	}
+	if repo.Provider != "terminal" {
+		t.Errorf("repo.Provider = %q, want %q", repo.Provider, "terminal")
+	}
+	if repo.ChannelID != "my-channel" {
+		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "my-channel")
+	}
+}
+
+func TestBridge_HandleClone_AbsolutePathRejected(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	targetDir := filepath.Join(dir, "myrepo")
+
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	// Absolute paths are now rejected - names must be safe alphanumeric
+	result := b.handleClone("terminal", "https://github.com/example/repo "+targetDir)
+
+	if !strings.Contains(result, "must contain only letters, numbers, hyphens, and underscores") {
+		t.Errorf("expected safe name error, got %q", result)
+	}
+}
+
+func TestBridge_HandleClone_CustomBaseDir(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	baseDir := filepath.Join(dir, "repos")
+
+	cfg := &config.Config{
+		Repos: make(map[string]config.RepoConfig),
+		Defaults: config.Defaults{
+			LLM:     "claude",
+			BaseDir: baseDir,
+		},
+	}
+	b := New(cfg, cfgPath)
+
+	var clonedDir string
+	b.cloneRepo = func(url, destDir string) error {
+		clonedDir = destDir
+		return nil
+	}
+
+	result := b.handleClone("terminal", "https://github.com/example/repo myrepo")
+
+	expectedDir := filepath.Join(baseDir, "myrepo")
+	if clonedDir != expectedDir {
+		t.Errorf("cloned dir = %q, want %q", clonedDir, expectedDir)
+	}
+	if !strings.Contains(result, "Cloned and registered repo") {
+		t.Errorf("expected success message, got %q", result)
+	}
+}
+
+func TestBridge_HandleClone_RuntimeAddRepoError(t *testing.T) {
+	// Use non-existent path to trigger file write error
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "/nonexistent/path/config.yaml")
+
+	b.cloneRepo = func(url, destDir string) error {
+		return nil
+	}
+
+	result := b.handleClone("terminal", "https://github.com/example/repo myrepo")
+
+	if !strings.Contains(result, "Cloned but failed to register") {
+		t.Errorf("expected register error message, got %q", result)
+	}
+}
+
+func TestBridge_HandleBridgeCommand_Clone(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &config.Config{
+		Repos:    make(map[string]config.RepoConfig),
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	cloneCalled := false
+	b.cloneRepo = func(url, destDir string) error {
+		cloneCalled = true
+		return nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "clone", Args: "https://github.com/example/repo myrepo channel-999"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	if !cloneCalled {
+		t.Error("clone was not called")
+	}
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Cloned and registered repo") {
+		t.Errorf("expected success message, got %q", msgs[0].Content)
+	}
+}
+
+// Tests for handleAddWorktree
+
+func TestBridge_HandleAddWorktree_NoArgs(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	result := b.handleAddWorktree("discord", "channel-123", "")
+	if result != "Usage: /add-worktree <name> <branch> [channel-id]" {
+		t.Errorf("expected usage message, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_OnlyName(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	result := b.handleAddWorktree("discord", "channel-123", "myworktree")
+	if result != "Usage: /add-worktree <name> <branch> [channel-id]" {
+		t.Errorf("expected usage message, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_NoRepoForChannel(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	result := b.handleAddWorktree("discord", "unknown-channel", "myworktree feature-branch")
+	if !strings.Contains(result, "no repo configured for this channel") {
+		t.Errorf("expected 'no repo configured' error, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_PathTraversalDotDot(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	// Names with special characters are rejected by IsSafeRepoName
+	result := b.handleAddWorktree("discord", "channel-123", "../escape feature-branch channel-999")
+	if !strings.Contains(result, "must contain only letters, numbers, hyphens, and underscores") {
+		t.Errorf("expected safe name error, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_PathTraversalSlash(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	// Names with slashes are rejected by IsSafeRepoName
+	result := b.handleAddWorktree("discord", "channel-123", "path/escape feature-branch channel-999")
+	if !strings.Contains(result, "must contain only letters, numbers, hyphens, and underscores") {
+		t.Errorf("expected safe name error, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_DiscordNoChannelID(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	result := b.handleAddWorktree("discord", "channel-123", "myworktree feature-branch")
+	if !strings.Contains(result, "channel-id is required for Discord") {
+		t.Errorf("expected channel-id required error, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_TerminalAutoChannelID(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"test-repo": {
+				Provider:   "terminal",
+				ChannelID:  "terminal",
+				LLM:        "claude",
+				WorkingDir: "/tmp/test",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	addWorktreeCalled := false
+	var capturedGitRoot, capturedWtDir, capturedBranch string
+	b.addWorktree = func(repoDir, wtDir, branch string) error {
+		addWorktreeCalled = true
+		capturedGitRoot = repoDir
+		capturedWtDir = wtDir
+		capturedBranch = branch
+		return nil
+	}
+
+	result := b.handleAddWorktree("terminal", "terminal", "myworktree feature-branch")
+	if !addWorktreeCalled {
+		t.Fatal("addWorktree was not called")
+	}
+	if capturedGitRoot != "/tmp/test" {
+		t.Errorf("git root = %q, want %q", capturedGitRoot, "/tmp/test")
+	}
+	if capturedWtDir != "/tmp/test-myworktree" {
+		t.Errorf("worktree dir = %q, want %q", capturedWtDir, "/tmp/test-myworktree")
+	}
+	if capturedBranch != "feature-branch" {
+		t.Errorf("branch = %q, want %q", capturedBranch, "feature-branch")
+	}
+	if !strings.Contains(result, "Created worktree") {
+		t.Errorf("expected success message, got %q", result)
+	}
+	if !strings.Contains(result, "terminal-test-repo/myworktree") {
+		t.Errorf("expected auto-generated channel ID in result, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_Success(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"test-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-123",
+				LLM:        "claude",
+				WorkingDir: "/tmp/test",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	addWorktreeCalled := false
+	b.addWorktree = func(repoDir, wtDir, branch string) error {
+		addWorktreeCalled = true
+		return nil
+	}
+
+	result := b.handleAddWorktree("discord", "channel-123", "myworktree feature-branch channel-999")
+	if !addWorktreeCalled {
+		t.Fatal("addWorktree was not called")
+	}
+	if !strings.Contains(result, "Created worktree") {
+		t.Errorf("expected success message, got %q", result)
+	}
+	if !strings.Contains(result, "test-repo/myworktree") {
+		t.Errorf("expected child repo name in result, got %q", result)
+	}
+	if !strings.Contains(result, "channel-999") {
+		t.Errorf("expected channel ID in result, got %q", result)
+	}
+
+	// Verify repo was added to memory
+	b.mu.Lock()
+	repo, ok := b.cfg.Repos["test-repo/myworktree"]
+	b.mu.Unlock()
+
+	if !ok {
+		t.Fatal("repo 'test-repo/myworktree' not found in memory")
+	}
+	if repo.ChannelID != "channel-999" {
+		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "channel-999")
+	}
+	if repo.WorkingDir != "/tmp/test-myworktree" {
+		t.Errorf("repo.WorkingDir = %q, want %q", repo.WorkingDir, "/tmp/test-myworktree")
+	}
+	if repo.GitRoot != "/tmp/test" {
+		t.Errorf("repo.GitRoot = %q, want %q", repo.GitRoot, "/tmp/test")
+	}
+	if repo.Branch != "feature-branch" {
+		t.Errorf("repo.Branch = %q, want %q", repo.Branch, "feature-branch")
+	}
+	if repo.Provider != "discord" {
+		t.Errorf("repo.Provider = %q, want %q", repo.Provider, "discord")
+	}
+}
+
+func TestBridge_HandleAddWorktree_WorktreeError(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	b.addWorktree = func(repoDir, wtDir, branch string) error {
+		return fmt.Errorf("git error: branch already exists")
+	}
+
+	result := b.handleAddWorktree("discord", "channel-123", "myworktree feature-branch channel-999")
+	// Error message is sanitized to avoid exposing paths
+	if !strings.Contains(result, "Failed to create worktree") {
+		t.Errorf("expected worktree error message, got %q", result)
+	}
+}
+
+func TestBridge_HandleAddWorktree_UsesGitRootFromWorktreeRepo(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	// Simulate a repo that is already a worktree (has GitRoot set)
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"parent/feature1": {
+				Provider:   "discord",
+				ChannelID:  "channel-123",
+				LLM:        "claude",
+				WorkingDir: "/repos/myproject-feature1",
+				GitRoot:    "/repos/myproject",
+				Branch:     "feature1",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	var capturedGitRoot, capturedWtDir string
+	b.addWorktree = func(repoDir, wtDir, branch string) error {
+		capturedGitRoot = repoDir
+		capturedWtDir = wtDir
+		return nil
+	}
+
+	result := b.handleAddWorktree("discord", "channel-123", "feature2 feature2-branch channel-456")
+	if capturedGitRoot != "/repos/myproject" {
+		t.Errorf("should use GitRoot from parent, got git root = %q, want %q", capturedGitRoot, "/repos/myproject")
+	}
+	if capturedWtDir != "/repos/myproject-feature2" {
+		t.Errorf("worktree dir should be based on GitRoot, got = %q, want %q", capturedWtDir, "/repos/myproject-feature2")
+	}
+	if !strings.Contains(result, "Created worktree") {
+		t.Errorf("expected success, got %q", result)
+	}
+
+	// Verify the new repo uses the same GitRoot
+	b.mu.Lock()
+	newRepo, ok := b.cfg.Repos["parent/feature1/feature2"]
+	b.mu.Unlock()
+
+	if !ok {
+		t.Fatal("new repo not found")
+	}
+	if newRepo.GitRoot != "/repos/myproject" {
+		t.Errorf("new repo GitRoot = %q, want %q", newRepo.GitRoot, "/repos/myproject")
+	}
+}
+
+func TestBridge_HandleAddWorktree_PersistError(t *testing.T) {
+	// Use a path that will fail to write
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"test-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-123",
+				LLM:        "claude",
+				WorkingDir: "/tmp/test",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, "/nonexistent/path/config.yaml")
+
+	b.addWorktree = func(repoDir, wtDir, branch string) error {
+		return nil
+	}
+
+	result := b.handleAddWorktree("discord", "channel-123", "myworktree feature-branch channel-999")
+	if !strings.Contains(result, "Worktree created but failed to register") {
+		t.Errorf("expected persist error message, got %q", result)
+	}
+}
+
+func TestBridge_HandleBridgeCommand_AddWorktree(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"test-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-123",
+				LLM:        "claude",
+				WorkingDir: "/tmp/test",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	b.addWorktree = func(repoDir, wtDir, branch string) error {
+		return nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	route := router.Route{Type: router.RouteToBridge, Command: "add-worktree", Args: "myworktree feature-branch channel-999"}
+	b.handleBridgeCommand(mockProv, "channel-123", route)
+
+	msgs := mockProv.GetSentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Created worktree") {
+		t.Errorf("expected success message, got %q", msgs[0].Content)
+	}
 }

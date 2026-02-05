@@ -192,6 +192,25 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 | `/cancel`        | Bridge  | Send SIGINT to LLM            |
 | `/restart`       | Bridge  | Restart LLM process           |
 | `/select <repo>` | Bridge  | Select repo for terminal      |
-| `/help`          | Bridge  | Show available commands        |
+| `/help`          | Bridge  | Show available commands       |
 | `::commit`       | LLM     | Translates to `/commit`       |
 | text             | LLM     | Raw message to LLM            |
+
+### Dynamic Repo Management
+
+| Input                                      | Handler | Description                        |
+| ------------------------------------------ | ------- | ---------------------------------- |
+| `/clone <url> <name> [channel-id]`         | Bridge  | Clone a git repo and register it   |
+| `/add-worktree <name> <branch> [channel-id]` | Bridge  | Create worktree from current repo  |
+| `/list-repos`                              | Bridge  | List all configured repos          |
+| `/remove-repo <name>`                      | Bridge  | Remove a repo from config          |
+| `/worktrees`                               | Bridge  | List git worktrees for current repo|
+
+### Config: defaults.base_dir
+
+The `defaults.base_dir` setting specifies the base directory for cloned repos. Must be an absolute path or "." (defaults to "." if not set).
+
+```yaml
+defaults:
+  base_dir: /home/user/repos  # absolute path for cloned repos
+```

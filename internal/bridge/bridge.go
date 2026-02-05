@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -33,8 +35,15 @@ type GitDetector func(dir string) (*git.RepoInfo, error)
 // WorktreeLister lists git worktrees for a directory.
 type WorktreeLister func(dir string) ([]git.WorktreeInfo, error)
 
+// CloneRepoFunc clones a git repository. Defaults to git.CloneRepo.
+type CloneRepoFunc func(url, destDir string) error
+
+// AddWorktreeFunc creates a new git worktree. Defaults to git.AddWorktree.
+type AddWorktreeFunc func(repoDir, wtDir, branch string) error
+
 type Bridge struct {
 	cfg             *config.Config
+	cfgPath         string
 	providers       map[string]provider.Provider
 	repos           map[string]*repoSession
 	output          *output.Handler
@@ -43,6 +52,8 @@ type Bridge struct {
 	llmFactory      LLMFactory
 	gitDetector     GitDetector
 	worktreeLister  WorktreeLister
+	cloneRepo       CloneRepoFunc
+	addWorktree     AddWorktreeFunc
 
 	userLimiter    *ratelimit.Limiter
 	channelLimiter *ratelimit.Limiter
@@ -65,9 +76,10 @@ type channelRef struct {
 	channelID string
 }
 
-func New(cfg *config.Config) *Bridge {
+func New(cfg *config.Config, cfgPath string) *Bridge {
 	b := &Bridge{
 		cfg:       cfg,
+		cfgPath:   cfgPath,
 		providers: make(map[string]provider.Provider),
 		repos:     make(map[string]*repoSession),
 		output:    output.NewHandler(cfg.Defaults.OutputThreshold),
@@ -78,6 +90,8 @@ func New(cfg *config.Config) *Bridge {
 		terminalFactory: provider.NewTerminal,
 		gitDetector:     git.DetectRepo,
 		worktreeLister:  git.ListWorktrees,
+		cloneRepo:       git.CloneRepo,
+		addWorktree:     git.AddWorktree,
 	}
 
 	if cfg.Defaults.RateLimit.GetRateLimitEnabled() {
@@ -220,8 +234,32 @@ func (b *Bridge) handleBridgeCommand(prov provider.Provider, channelID string, r
 		response = b.restartLLM(channelID)
 	case "worktrees":
 		response = b.listWorktrees(channelID)
+	case "list-repos":
+		response = b.handleListRepos()
+	case "remove-repo":
+		response = b.handleRemoveRepo(route.Args)
+	case "clone":
+		response = b.handleClone(prov.Name(), route.Args)
+	case "add-worktree":
+		response = b.handleAddWorktree(prov.Name(), channelID, route.Args)
 	case "help":
-		response = "Commands: /status, /cancel, /restart, /help, /select <repo>, /worktrees\nSkills: ::commit, ::review-pr, etc."
+		response = `Commands:
+  /help                                  - Show this help
+  /status                                - Show LLM status and idle time
+  /cancel                                - Send SIGINT to LLM
+  /restart                               - Restart LLM process
+  /select <repo>                         - Select repo for terminal
+
+Repo Management:
+  /list-repos                            - List all configured repos
+  /clone <url> <name> [channel-id]       - Clone a git repo and register it
+  /remove-repo <name>                    - Remove a repo from config
+
+Worktrees:
+  /worktrees                             - List git worktrees for current repo
+  /add-worktree <name> <branch> [channel-id] - Create worktree from current repo
+
+Skills: ::commit, ::review-pr, etc.`
 	default:
 		response = fmt.Sprintf("Unknown command: %s", route.Command)
 	}
@@ -674,4 +712,249 @@ func (b *Bridge) listWorktrees(channelID string) string {
 		sb.WriteString(line + "\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// RuntimeAddRepo adds a repo to memory and persists it to the config file.
+// The operation is atomic: if persistence fails, memory is not updated.
+func (b *Bridge) RuntimeAddRepo(name string, repo config.RepoConfig) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Persist first - if this fails, memory stays consistent
+	if err := config.AddRepo(b.cfgPath, name, repo); err != nil {
+		return err
+	}
+
+	// Update memory only after successful persistence
+	if b.cfg.Repos == nil {
+		b.cfg.Repos = make(map[string]config.RepoConfig)
+	}
+	b.cfg.Repos[name] = repo
+
+	return nil
+}
+
+func (b *Bridge) handleListRepos() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if len(b.cfg.Repos) == 0 {
+		return "No repos configured"
+	}
+
+	// Collect and sort repo names alphabetically
+	var repoNames []string
+	for name := range b.cfg.Repos {
+		repoNames = append(repoNames, name)
+	}
+	sort.Strings(repoNames)
+
+	var sb strings.Builder
+	sb.WriteString("Configured repos:\n")
+
+	for _, name := range repoNames {
+		repo := b.cfg.Repos[name]
+
+		// Truncate working dir to last 30 chars if longer
+		workingDir := repo.WorkingDir
+		if len(workingDir) > 30 {
+			workingDir = "..." + workingDir[len(workingDir)-27:]
+		}
+
+		// Check if session is active
+		status := "inactive"
+		if session, ok := b.repos[name]; ok && session.llm != nil && session.llm.Running() {
+			status = "active"
+		}
+
+		// Format: - repo_name (channel: X, dir: Y, status, [branch: Z])
+		line := fmt.Sprintf("- %s (channel: %s, dir: %s, %s", name, repo.ChannelID, workingDir, status)
+		if repo.Branch != "" {
+			line += fmt.Sprintf(", branch: %s", repo.Branch)
+		}
+		line += ")"
+		sb.WriteString(line + "\n")
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// handleRemoveRepo removes a repo from config and stops its active session.
+// This does NOT delete any files on disk - only the config entry.
+func (b *Bridge) handleRemoveRepo(args string) string {
+	name := strings.TrimSpace(args)
+	if name == "" {
+		return "Usage: /remove-repo <repo-name>"
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Check if repo exists in config
+	if _, ok := b.cfg.Repos[name]; !ok {
+		return fmt.Sprintf("Repo %q not found", name)
+	}
+
+	// Stop active session if running
+	if session, ok := b.repos[name]; ok {
+		if session.llm != nil {
+			_ = session.llm.Stop()
+		}
+		if session.cancelCtx != nil {
+			session.cancelCtx()
+		}
+		delete(b.repos, name)
+	}
+
+	// Persist removal to config file
+	if err := config.RemoveRepo(b.cfgPath, name); err != nil {
+		return fmt.Sprintf("Failed to remove repo: %v", err)
+	}
+
+	// Remove from memory after successful persistence
+	delete(b.cfg.Repos, name)
+
+	return fmt.Sprintf("Removed repo %q (files on disk were not deleted)", name)
+}
+
+// handleClone clones an external repo and registers it as a new llm-bridge repo.
+// Usage: /clone <url> <name> [channel-id]
+// - url: Git repository URL (required, must use https/git/ssh scheme)
+// - name: Repo name (required, alphanumeric with hyphens/underscores only)
+// - channel-id: For Discord, required; for Terminal, defaults to "terminal-<name>"
+func (b *Bridge) handleClone(providerName string, args string) string {
+	parts := strings.Fields(args)
+	if len(parts) < 2 {
+		return "Usage: /clone <url> <name> [channel-id]"
+	}
+
+	url := parts[0]
+	name := parts[1]
+	var channelID string
+	if len(parts) >= 3 {
+		channelID = parts[2]
+	}
+
+	// Security: validate URL scheme (prevents malicious URLs like ext::, file://)
+	if !git.IsAllowedGitURL(url) {
+		return "Error: URL must use https, git, or ssh scheme"
+	}
+
+	// Security: validate name uses only safe characters (alphanumeric, hyphen, underscore)
+	if !git.IsSafeRepoName(name) {
+		return "Error: name must contain only letters, numbers, hyphens, and underscores"
+	}
+
+	// Determine destination directory (always relative to BaseDir)
+	baseDir := b.cfg.Defaults.GetBaseDir()
+	destDir := filepath.Join(baseDir, name)
+
+	// Determine channel ID based on provider
+	if channelID == "" {
+		if providerName == "discord" {
+			return "Error: channel-id is required for Discord"
+		}
+		// Terminal: default to "terminal-<name>"
+		channelID = "terminal-" + name
+	}
+
+	// Clone the repository
+	if err := b.cloneRepo(url, destDir); err != nil {
+		return "Clone failed: check URL is accessible and directory doesn't exist"
+	}
+
+	// Create RepoConfig
+	repo := config.RepoConfig{
+		Provider:   providerName,
+		ChannelID:  channelID,
+		LLM:        b.cfg.Defaults.LLM,
+		WorkingDir: destDir,
+	}
+
+	// Persist to config
+	if err := b.RuntimeAddRepo(name, repo); err != nil {
+		return fmt.Sprintf("Cloned but failed to register: %v", err)
+	}
+
+	return fmt.Sprintf("Cloned and registered repo %q (channel: %s)", name, channelID)
+}
+
+// handleAddWorktree creates a new git worktree from the current repo and registers it.
+// Usage: /add-worktree <name> <branch> [channel-id]
+// - name: Worktree name (required, alphanumeric with hyphens/underscores only)
+// - branch: Branch name to create (required)
+// - channel-id: For Discord, required; for Terminal, defaults to "terminal-<parent>/<name>"
+func (b *Bridge) handleAddWorktree(providerName string, parentChannelID string, args string) string {
+	parts := strings.Fields(args)
+	if len(parts) < 2 {
+		return "Usage: /add-worktree <name> <branch> [channel-id]"
+	}
+
+	name := parts[0]
+	branch := parts[1]
+	var newChannelID string
+	if len(parts) >= 3 {
+		newChannelID = parts[2]
+	}
+
+	// Security: validate name uses only safe characters (alphanumeric, hyphen, underscore)
+	if !git.IsSafeRepoName(name) {
+		return "Error: name must contain only letters, numbers, hyphens, and underscores"
+	}
+
+	// Validate branch is also safe (alphanumeric, hyphen, underscore, slash for feature branches)
+	if !git.IsSafeRepoName(strings.ReplaceAll(branch, "/", "-")) {
+		return "Error: branch must contain only letters, numbers, hyphens, underscores, and slashes"
+	}
+
+	// Find current repo from channel
+	parentRepoName := b.repoForChannel(parentChannelID)
+	if parentRepoName == "" {
+		return "Error: no repo configured for this channel"
+	}
+
+	parentRepo := b.cfg.Repos[parentRepoName]
+
+	// Determine git root: if current repo has GitRoot set (is worktree), use GitRoot; otherwise use WorkingDir
+	parentGitRoot := parentRepo.GitRoot
+	if parentGitRoot == "" {
+		parentGitRoot = parentRepo.WorkingDir
+	}
+
+	// Determine worktree destination: <git-root>-<name> (adjacent to main repo)
+	wtDir := parentGitRoot + "-" + name
+
+	// Create child repo name with parent/child naming
+	childName := parentRepoName + "/" + name
+
+	// Determine channel ID based on provider
+	if newChannelID == "" {
+		if providerName == "discord" {
+			return "Error: channel-id is required for Discord"
+		}
+		// Terminal: default to "terminal-<childName>"
+		newChannelID = "terminal-" + childName
+	}
+
+	// Create the worktree
+	if err := b.addWorktree(parentGitRoot, wtDir, branch); err != nil {
+		return "Failed to create worktree: check branch doesn't already exist"
+	}
+
+	// Create RepoConfig
+	repo := config.RepoConfig{
+		Provider:   parentRepo.Provider,
+		ChannelID:  newChannelID,
+		LLM:        parentRepo.LLM,
+		WorkingDir: wtDir,
+		GitRoot:    parentGitRoot,
+		Branch:     branch,
+	}
+
+	// Persist to config
+	if err := b.RuntimeAddRepo(childName, repo); err != nil {
+		return fmt.Sprintf("Worktree created but failed to register: %v", err)
+	}
+
+	return fmt.Sprintf("Created worktree %q (channel: %s, branch: %s)", childName, newChannelID, branch)
 }
