@@ -2696,7 +2696,7 @@ func TestBridge_RuntimeAddRepo_Success(t *testing.T) {
 		WorkingDir: "/tmp/newrepo",
 	}
 
-	err := b.RuntimeAddRepo("new-repo", repo)
+	err := b.RuntimeAddRepo("new-repo", repo, false)
 	if err != nil {
 		t.Fatalf("RuntimeAddRepo() error = %v", err)
 	}
@@ -2758,7 +2758,7 @@ func TestBridge_RuntimeAddRepo_DuplicateChannelID_Error(t *testing.T) {
 		WorkingDir: "/tmp/newrepo",
 	}
 
-	err = b.RuntimeAddRepo("new-repo", repo)
+	err = b.RuntimeAddRepo("new-repo", repo, false)
 	if err == nil {
 		t.Fatal("RuntimeAddRepo() expected error for duplicate channel_id")
 	}
@@ -2798,7 +2798,7 @@ func TestBridge_RuntimeAddRepo_FileWriteError(t *testing.T) {
 		WorkingDir: "/tmp/newrepo",
 	}
 
-	err := b.RuntimeAddRepo("new-repo", repo)
+	err := b.RuntimeAddRepo("new-repo", repo, false)
 	if err == nil {
 		t.Fatal("RuntimeAddRepo() expected error for file write failure")
 	}
@@ -2844,7 +2844,7 @@ func TestBridge_RuntimeAddRepo_ExistingConfig(t *testing.T) {
 		WorkingDir: "/tmp/newrepo",
 	}
 
-	err = b.RuntimeAddRepo("new-repo", repo)
+	err = b.RuntimeAddRepo("new-repo", repo, false)
 	if err != nil {
 		t.Fatalf("RuntimeAddRepo() error = %v", err)
 	}
@@ -2893,7 +2893,7 @@ func TestBridge_RuntimeAddRepo_NilReposMap(t *testing.T) {
 		WorkingDir: "/tmp/newrepo",
 	}
 
-	err := b.RuntimeAddRepo("new-repo", repo)
+	err := b.RuntimeAddRepo("new-repo", repo, false)
 	if err != nil {
 		t.Fatalf("RuntimeAddRepo() error = %v", err)
 	}
@@ -2911,6 +2911,58 @@ func TestBridge_RuntimeAddRepo_NilReposMap(t *testing.T) {
 	}
 	if storedRepo.ChannelID != "channel-999" {
 		t.Errorf("storedRepo.ChannelID = %q, want %q", storedRepo.ChannelID, "channel-999")
+	}
+}
+
+func TestBridge_RuntimeAddRepo_CheckExists_RejectsDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+
+	cfg := &config.Config{
+		Repos: map[string]config.RepoConfig{
+			"existing-repo": {
+				Provider:   "discord",
+				ChannelID:  "channel-111",
+				LLM:        "claude",
+				WorkingDir: "/tmp/existing",
+			},
+		},
+		Defaults: config.NewDefaults(),
+	}
+	b := New(cfg, cfgPath)
+
+	// Pre-persist the initial config
+	err := config.AddRepo(cfgPath, "existing-repo", cfg.Repos["existing-repo"])
+	if err != nil {
+		t.Fatalf("failed to create initial config: %v", err)
+	}
+
+	// Try to add a repo with the same name with checkExists=true
+	repo := config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-222", // different channel, but same name
+		LLM:        "claude",
+		WorkingDir: "/tmp/newrepo",
+	}
+
+	err = b.RuntimeAddRepo("existing-repo", repo, true)
+	if err == nil {
+		t.Fatal("RuntimeAddRepo() expected error for duplicate name with checkExists=true")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "already exists")
+	}
+
+	// Verify memory was NOT updated (should still have original)
+	b.mu.Lock()
+	storedRepo, ok := b.cfg.Repos["existing-repo"]
+	b.mu.Unlock()
+
+	if !ok {
+		t.Fatal("existing-repo should still be in memory")
+	}
+	if storedRepo.ChannelID != "channel-111" {
+		t.Errorf("storedRepo.ChannelID = %q, want %q (original)", storedRepo.ChannelID, "channel-111")
 	}
 }
 
