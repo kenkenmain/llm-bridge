@@ -127,6 +127,41 @@ func TestAddRepo_DuplicateChannelID(t *testing.T) {
 	}
 }
 
+func TestAddRepo_DuplicateChannelID_WithWorktree(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	// Existing config has a worktree with channel_id "222".
+	content := `repos:
+  myproject:
+    provider: discord
+    channel_id: "111"
+    llm: claude
+    working_dir: /code/myproject
+    worktrees:
+      - name: feature
+        path: /code/myproject-feature
+        channel_id: "222"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	// Adding a repo with channel_id "222" should fail — collides with worktree.
+	err := AddRepo(path, "other-repo", RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "222",
+		LLM:        "claude",
+		WorkingDir: "/tmp/other",
+	})
+	if err == nil {
+		t.Fatal("AddRepo() expected error for channel_id colliding with worktree")
+	}
+	if !strings.Contains(err.Error(), "duplicate channel_id") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "duplicate channel_id")
+	}
+}
+
 func TestAddRepo_WithGitRootAndBranch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

@@ -188,8 +188,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Check for duplicate channel IDs across all repo entries (including expanded worktrees).
-	channelIDs := make(map[string]string) // channel_id -> repo name
+	// Check for duplicate channel IDs across all repo entries and worktree
+	// definitions. This catches collisions both after worktree expansion
+	// (Load path) and on raw configs (AddRepo path).
+	channelIDs := make(map[string]string) // channel_id -> source label
 	for name, repo := range c.Repos {
 		if repo.ChannelID != "" {
 			if existing, ok := channelIDs[repo.ChannelID]; ok {
@@ -201,6 +203,19 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("duplicate channel_id %q in repos %q and %q", repo.ChannelID, a, b)
 			}
 			channelIDs[repo.ChannelID] = name
+		}
+		for _, wt := range repo.Worktrees {
+			if wt.ChannelID != "" {
+				wtLabel := name + "/" + wt.Name
+				if existing, ok := channelIDs[wt.ChannelID]; ok {
+					a, b := existing, wtLabel
+					if a > b {
+						a, b = b, a
+					}
+					return fmt.Errorf("duplicate channel_id %q in repos %q and %q", wt.ChannelID, a, b)
+				}
+				channelIDs[wt.ChannelID] = wtLabel
+			}
 		}
 	}
 	return nil
@@ -222,8 +237,7 @@ func loadRaw(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	// Apply defaults for any zero-value fields. These three fields must stay
-	// in sync with NewDefaults().
+	// Apply NewDefaults() values for any zero-value fields.
 	defaults := NewDefaults()
 	if cfg.Defaults.LLM == "" {
 		cfg.Defaults.LLM = defaults.LLM
@@ -242,6 +256,14 @@ func Load(path string) (*Config, error) {
 	cfg, err := loadRaw(path)
 	if err != nil {
 		return nil, err
+	}
+
+	// Validate the raw config before expanding worktrees. This catches field
+	// integrity issues and duplicate channel_ids (including worktree-level
+	// channel_ids). After expansion, worktree channel_ids become top-level
+	// entries and would double-count if Validate ran again.
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
 	// Expand worktrees into separate repo entries.
@@ -271,10 +293,6 @@ func Load(path string) (*Config, error) {
 	}
 	for name, repo := range expansions {
 		cfg.Repos[name] = repo
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
 	return cfg, nil
