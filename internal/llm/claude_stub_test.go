@@ -44,7 +44,11 @@ done
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer c.Stop()
+	t.Cleanup(func() {
+		if err := c.Stop(); err != nil {
+			t.Errorf("Stop() error = %v", err)
+		}
+	})
 
 	if !c.Running() {
 		t.Fatal("expected Running() to be true after Start()")
