@@ -63,7 +63,7 @@ Integration tests require network access and a valid Discord bot token. Default 
 - `DISCORD_BOT_TOKEN` — override default bot token
 - `DISCORD_TEST_CHANNEL_ID` — override default test channel
 
-Integration tests are tagged `manual` so `bazel test //...` skips them automatically.
+Integration tests are tagged `manual` and excluded from CI via `test:ci --test_tag_filters=-integration` in `.bazelrc`.
 
 ## Make (shortcuts)
 
