@@ -4,7 +4,6 @@ go 1.21
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
-	github.com/creack/pty v1.1.24
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/time v0.5.0
 	gopkg.in/yaml.v3 v3.0.1

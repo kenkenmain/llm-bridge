@@ -389,7 +389,7 @@ func (b *Bridge) readOutput(session *repoSession, repoName string) {
 	defer ticker.Stop()
 
 	// Use goroutine for non-blocking reads with buffered channel
-	// to prevent PTY backpressure when broadcast is slow
+	// to prevent backpressure when broadcast is slow
 	type readResult struct {
 		line string
 		err  error
@@ -423,8 +423,7 @@ func (b *Bridge) readOutput(session *repoSession, repoName string) {
 				return
 			}
 			if result.err != nil {
-				// Include any partial line before error
-				buffer += result.line
+				// Don't parse partial JSON on error/EOF — buffer already has extracted text
 				if buffer != "" {
 					b.broadcastOutput(session, buffer)
 				}
@@ -436,7 +435,12 @@ func (b *Bridge) readOutput(session *repoSession, repoName string) {
 				}
 				return
 			}
-			buffer += result.line
+			text := extractText(result.line)
+			if text == "" {
+				// Non-text event (tool_use, system, metadata) — skip for display
+				continue
+			}
+			buffer += text
 			session.llm.UpdateActivity()
 
 			if len(buffer) > b.cfg.Defaults.OutputThreshold {

@@ -9,7 +9,6 @@ go_library(
     ],
     importpath = "github.com/anthropics/llm-bridge/internal/llm",
     visibility = ["//:__subpackages__"],
-    deps = ["@com_github_creack_pty//:pty"],
 )
 
 go_test(

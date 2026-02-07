@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "bridge.go",
         "merger.go",
+        "stream_event.go",
     ],
     importpath = "github.com/anthropics/llm-bridge/internal/bridge",
     visibility = ["//:__subpackages__"],

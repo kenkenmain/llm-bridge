@@ -1,17 +1,22 @@
 package llm
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/creack/pty"
 )
+
+// streamResult is a minimal struct for extracting session IDs from NDJSON result events.
+type streamResult struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+}
 
 type Claude struct {
 	workingDir    string
@@ -19,11 +24,13 @@ type Claude struct {
 	claudePath    string
 
 	mu           sync.Mutex
-	cmd          *exec.Cmd
-	ptmx         *os.File
-	running      bool
+	ctx          context.Context    // Stored from Start() for subprocess spawning
+	activeCmd    *exec.Cmd          // Currently-running subprocess (nil between messages)
+	pipeReader   *io.PipeReader     // Stable reader returned by Output()
+	pipeWriter   *io.PipeWriter     // Write end; subprocess stdout is copied here
+	running      bool               // True from Start() to Stop()
+	sessionID    string             // Captured from first response for -r flag
 	lastActivity time.Time
-	closeOnce    *sync.Once // Pointer to allow per-process allocation
 }
 
 type ClaudeOption func(*Claude)
@@ -73,45 +80,11 @@ func (c *Claude) Start(ctx context.Context) error {
 		return nil
 	}
 
-	args := []string{}
-	if c.resumeSession {
-		args = append(args, "--resume")
-	}
-
-	c.cmd = exec.CommandContext(ctx, c.claudePath, args...)
-	c.cmd.Dir = c.workingDir
-	c.cmd.Env = os.Environ()
-
-	var err error
-	c.ptmx, err = pty.Start(c.cmd)
-	if err != nil {
-		return fmt.Errorf("start pty: %w", err)
-	}
-
+	c.pipeReader, c.pipeWriter = io.Pipe()
+	c.ctx = ctx
 	c.running = true
 	c.lastActivity = time.Now()
-	c.closeOnce = &sync.Once{} // New sync.Once for this process
-
-	// Capture per-process values to avoid race between old/new process goroutines
-	currentPtmx := c.ptmx
-	currentOnce := c.closeOnce
-	currentCmd := c.cmd
-
-	go func() {
-		_ = currentCmd.Wait()
-		c.mu.Lock()
-		// Only update running if this is still the current process
-		if c.cmd == currentCmd {
-			c.running = false
-		}
-		// Close the captured PTY using its own sync.Once
-		currentOnce.Do(func() {
-			if currentPtmx != nil {
-				_ = currentPtmx.Close()
-			}
-		})
-		c.mu.Unlock()
-	}()
+	c.sessionID = ""
 
 	return nil
 }
@@ -120,22 +93,20 @@ func (c *Claude) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !c.running || c.cmd == nil || c.cmd.Process == nil {
+	if !c.running {
 		return nil
 	}
 
-	if err := c.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		_ = c.cmd.Process.Kill()
+	// Kill active subprocess if present
+	if c.activeCmd != nil && c.activeCmd.Process != nil {
+		if err := syscall.Kill(-c.activeCmd.Process.Pid, syscall.SIGTERM); err != nil {
+			_ = c.activeCmd.Process.Kill()
+		}
 	}
 
-	// Close ptmx using sync.Once to prevent double-close
-	if c.closeOnce != nil {
-		c.closeOnce.Do(func() {
-			if c.ptmx != nil {
-				_ = c.ptmx.Close()
-				c.ptmx = nil
-			}
-		})
+	// Close pipeWriter to signal EOF to readers
+	if c.pipeWriter != nil {
+		_ = c.pipeWriter.Close()
 	}
 
 	c.running = false
@@ -144,21 +115,96 @@ func (c *Claude) Stop() error {
 
 func (c *Claude) Send(msg Message) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
-	if !c.running || c.ptmx == nil {
+	if !c.running || c.pipeWriter == nil {
+		c.mu.Unlock()
 		return fmt.Errorf("claude not running")
 	}
 
+	// Reject if a previous subprocess is still running
+	if c.activeCmd != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("previous message still processing")
+	}
+
+	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"}
+	if c.resumeSession && c.sessionID != "" {
+		args = append(args, "-r", c.sessionID)
+	}
+
+	cmd := exec.CommandContext(c.ctx, c.claudePath, args...)
+	cmd.Dir = c.workingDir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Pass message via stdin to avoid ARG_MAX risk
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("create stdin pipe: %w", err)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("create stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("start claude: %w", err)
+	}
+
+	// Write message to stdin and close to signal EOF
+	go func() {
+		_, _ = io.WriteString(stdinPipe, msg.Content)
+		_ = stdinPipe.Close()
+	}()
+
+	c.activeCmd = cmd
 	c.lastActivity = time.Now()
-	_, err := c.ptmx.WriteString(msg.Content + "\n")
-	return err
+
+	pw := c.pipeWriter
+	c.mu.Unlock()
+
+	// Goroutine: read subprocess stdout, extract session ID, forward to pipe
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		// Increase buffer size to 1MB to handle large NDJSON lines
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// Extract session ID from result events
+			var event streamResult
+			if json.Unmarshal([]byte(line), &event) == nil && event.Type == "result" && event.SessionID != "" {
+				c.mu.Lock()
+				c.sessionID = event.SessionID
+				c.mu.Unlock()
+			}
+
+			// Forward raw JSON line to pipeWriter
+			_, _ = pw.Write([]byte(line + "\n"))
+		}
+
+		// Reap the process
+		_ = cmd.Wait()
+
+		// Clear activeCmd
+		c.mu.Lock()
+		if c.activeCmd == cmd {
+			c.activeCmd = nil
+		}
+		c.mu.Unlock()
+	}()
+
+	return nil
 }
 
 func (c *Claude) Output() io.Reader {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.ptmx
+	return c.pipeReader
 }
 
 func (c *Claude) Running() bool {
@@ -171,11 +217,11 @@ func (c *Claude) Cancel() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !c.running || c.cmd == nil || c.cmd.Process == nil {
+	if !c.running || c.activeCmd == nil || c.activeCmd.Process == nil {
 		return nil
 	}
 
-	return c.cmd.Process.Signal(syscall.SIGINT)
+	return syscall.Kill(-c.activeCmd.Process.Pid, syscall.SIGINT)
 }
 
 func (c *Claude) LastActivity() time.Time {

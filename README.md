@@ -156,7 +156,7 @@ cmd/llm-bridge/     Entry point (Cobra CLI)
 internal/
   bridge/           Core orchestration, session management, output fanout
   config/           YAML configuration parsing
-  llm/              LLM interface, Claude PTY wrapper
+  llm/              LLM interface, Claude pipe-based wrapper
   provider/         Discord and Terminal providers
   ratelimit/        Token-bucket rate limiting
   router/           Command routing (/ and :: prefixes)
