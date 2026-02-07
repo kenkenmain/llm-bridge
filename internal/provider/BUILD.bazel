@@ -6,7 +6,6 @@ go_library(
         "discord.go",
         "mock.go",
         "provider.go",
-        "terminal.go",
     ],
     importpath = "github.com/anthropics/llm-bridge/internal/provider",
     visibility = ["//:__subpackages__"],
@@ -18,7 +17,6 @@ go_test(
     srcs = [
         "discord_test.go",
         "mock_test.go",
-        "terminal_test.go",
     ],
     embed = [":provider"],
 )

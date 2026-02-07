@@ -1,6 +1,6 @@
 # llm-bridge
 
-Go service bridging Discord/Terminal to Claude CLI.
+Go service bridging Discord to Claude/Codex CLI.
 
 ## Development Environment
 
@@ -141,7 +141,7 @@ Note: Docker requires bind-mounting host repo directories (see `docker-compose.y
 
 ## Add Repo
 
-### Dynamic (from Discord/Terminal)
+### Dynamic (from Discord)
 
 Use `/clone` to add repos at runtime without restarting:
 
@@ -182,8 +182,8 @@ providers:
 
 - `internal/bridge/` - Core bridge logic, input merging, output broadcasting
 - `internal/config/` - YAML config parsing
-- `internal/llm/` - LLM interface, Claude wrapper (PTY-based)
-- `internal/provider/` - Discord/Terminal providers (Discord requires specific Gateway Intents and bot permissions — see `docs/discord-setup.md`)
+- `internal/llm/` - LLM interface, Claude/Codex wrappers (PTY-based)
+- `internal/provider/` - Discord provider (requires specific Gateway Intents and bot permissions — see `docs/discord-setup.md`)
 - `internal/ratelimit/` - Per-user and per-channel rate limiting
 - `internal/router/` - Command routing (/, ::)
 - `internal/output/` - Output handling, file attachments
@@ -191,8 +191,8 @@ providers:
 ## Gotchas
 
 - Lint runs **outside Bazel sandbox** (`no-sandbox` tag) — needs network for first `golangci-lint` download
-- Only `claude` LLM backend exists (Codex was removed). Factory defaults empty string to `claude`
-- Claude is spawned via PTY (`creack/pty`), not stdin pipe — output parsing depends on terminal behavior
+- Supported LLM backends: `claude` and `codex`. Factory defaults empty string to `claude`
+- LLMs are spawned via PTY (`creack/pty`), not stdin pipe — output parsing depends on PTY behavior
 - See `llm-bridge.yaml.example` for config structure; can start with empty `repos:` and use `/clone` dynamically
 - Bazel builds are fully hermetic (Go SDK downloaded automatically) — only Bazelisk + Node.js needed on host
 - Docker solves deployment packaging, not build reproducibility (Bazel already handles that)
@@ -220,7 +220,6 @@ providers:
 | `/status`        | Bridge  | Show LLM status and idle time |
 | `/cancel`        | Bridge  | Send SIGINT to LLM            |
 | `/restart`       | Bridge  | Restart LLM process           |
-| `/select <repo>` | Bridge  | Select repo for terminal      |
 | `/help`          | Bridge  | Show available commands       |
 | `::commit`       | LLM     | Translates to `/commit`       |
 | text             | LLM     | Raw message to LLM            |
@@ -229,8 +228,8 @@ providers:
 
 | Input                                      | Handler | Description                        |
 | ------------------------------------------ | ------- | ---------------------------------- |
-| `/clone <url> <name> <channel-id>`         | Bridge  | Clone a git repo and register it (channel-id required for Discord) |
-| `/add-worktree <name> <branch> <channel-id>` | Bridge  | Create worktree from current repo (channel-id required for Discord) |
+| `/clone <url> <name> <channel-id>`         | Bridge  | Clone a git repo and register it |
+| `/add-worktree <name> <branch> <channel-id>` | Bridge  | Create worktree from current repo |
 | `/list-repos`                              | Bridge  | List all configured repos          |
 | `/remove-repo <name>`                      | Bridge  | Remove a repo from config          |
 | `/worktrees`                               | Bridge  | List git worktrees for current repo|

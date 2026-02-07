@@ -1,11 +1,11 @@
 # llm-bridge
 
-Go service that bridges Discord and Terminal interfaces to Claude CLI, enabling multi-channel LLM interaction.
+Go service that bridges Discord to Claude/Codex CLIs, enabling multi-channel LLM interaction.
 
 ## Features
 
-- **Multi-provider input** — Connect Discord bots and local terminal simultaneously
-- **Input merging** — Messages from multiple sources merged to LLM stdin with conflict prefixing
+- **Discord bridge** — Connect Discord channels to Claude/Codex sessions
+- **Input merging** — Messages from multiple Discord channels mapped to repos and merged to LLM stdin
 - **Output broadcast** — All LLM output sent to every connected channel
 - **Rate limiting** — Per-user and per-channel token-bucket rate limiting
 - **Idle timeout** — Automatic LLM process shutdown after configurable idle period
@@ -14,7 +14,8 @@ Go service that bridges Discord and Terminal interfaces to Claude CLI, enabling 
 ## Prerequisites
 
 - [Bazelisk](https://github.com/bazelbuild/bazelisk) (auto-downloads Bazel 8.5.1)
-- Docker & Docker Compose (for running)
+- Node.js (for Claude CLI: `npm install -g @anthropic-ai/claude-code`)
+- Docker & Docker Compose (optional, for containerized deployment)
 - Discord bot token (see [Discord Bot Setup Guide](docs/discord-setup.md))
 
 ## Discord Setup
@@ -91,7 +92,7 @@ You can start with just defaults - no pre-defined repos required! Use `/clone` f
 ```yaml
 defaults:
   base_dir: /home/user/repos  # where /clone creates new repos
-  llm: claude
+  llm: claude  # or codex
 
 providers:
   discord:
@@ -113,6 +114,8 @@ repos:
 defaults:
   base_dir: /home/user/repos
   llm: claude
+  claude_path: claude
+  codex_path: codex
   idle_timeout: 10m
   rate_limit:
     enabled: true
@@ -135,7 +138,6 @@ See `llm-bridge.yaml.example` for all options.
 | `/status`        | Show LLM status and idle time |
 | `/cancel`        | Send SIGINT to LLM            |
 | `/restart`       | Restart LLM process           |
-| `/select <repo>` | Select repo for terminal      |
 | `/help`          | Show available commands        |
 | `::commit`       | Translates to `/commit` for LLM |
 
@@ -143,8 +145,8 @@ See `llm-bridge.yaml.example` for all options.
 
 | Input                                      | Description                        |
 | ------------------------------------------ | ---------------------------------- |
-| `/clone <url> <name> <channel-id>`         | Clone a git repo and register it (channel-id required for Discord) |
-| `/add-worktree <name> <branch> <channel-id>` | Create worktree from current repo (channel-id required for Discord) |
+| `/clone <url> <name> <channel-id>`         | Clone a git repo and register it |
+| `/add-worktree <name> <branch> <channel-id>` | Create worktree from current repo |
 | `/list-repos`                              | List all configured repos          |
 | `/remove-repo <name>`                      | Remove a repo from config          |
 | `/worktrees`                               | List git worktrees for current repo|
@@ -156,8 +158,8 @@ cmd/llm-bridge/     Entry point (Cobra CLI)
 internal/
   bridge/           Core orchestration, session management, output fanout
   config/           YAML configuration parsing
-  llm/              LLM interface, Claude PTY wrapper
-  provider/         Discord and Terminal providers
+  llm/              LLM interface, Claude/Codex PTY wrappers
+  provider/         Discord provider
   ratelimit/        Token-bucket rate limiting
   router/           Command routing (/ and :: prefixes)
   output/           Output formatting, file attachments

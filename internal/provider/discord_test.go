@@ -115,19 +115,19 @@ func TestDiscord_MessageIncludesAuthorID(t *testing.T) {
 	}
 }
 
-// TestDiscord_MessageWithoutAuthorID verifies terminal-like messages
-// (no AuthorID) still work correctly.
+// TestDiscord_MessageWithoutAuthorID verifies messages without AuthorID
+// still work correctly.
 func TestDiscord_MessageWithoutAuthorID(t *testing.T) {
 	msg := Message{
-		ChannelID: "terminal",
+		ChannelID: "channel-123",
 		Content:   "test",
-		Author:    "localuser",
-		AuthorID:  "", // Terminal messages have no AuthorID
-		Source:    "terminal",
+		Author:    "user",
+		AuthorID:  "",
+		Source:    "discord",
 	}
 
 	if msg.AuthorID != "" {
-		t.Error("terminal messages should have empty AuthorID")
+		t.Error("messages without author ID should have empty AuthorID")
 	}
 }
 

@@ -16,7 +16,6 @@ func TestParse_BridgeCommands(t *testing.T) {
 		{"cancel", "/cancel", "cancel", RouteToBridge},
 		{"restart", "/restart", "restart", RouteToBridge},
 		{"help", "/help", "help", RouteToBridge},
-		{"select", "/select", "select", RouteToBridge},
 		{"status with args", "/status repo1", "status", RouteToBridge},
 		{"uppercase normalized", "/STATUS", "status", RouteToBridge},
 	}
@@ -42,6 +41,7 @@ func TestParse_LLMCommands(t *testing.T) {
 	}{
 		{"unknown slash", "/commit", "/commit"},
 		{"unknown slash with args", "/review-pr 123", "/review-pr 123"},
+		{"select now routes to llm", "/select notification-hooks", "/select notification-hooks"},
 		{"plain text", "refactor the auth module", "refactor the auth module"},
 		{"whitespace trimmed", "  hello world  ", "hello world"},
 		{"old ! prefix is plain text", "!commit", "!commit"},
@@ -81,19 +81,6 @@ func TestParse_DoubleColonTranslation(t *testing.T) {
 				t.Errorf("Parse(%q).Raw = %q, want %q", tt.input, route.Raw, tt.wantRaw)
 			}
 		})
-	}
-}
-
-func TestParse_BridgeCommandArgs(t *testing.T) {
-	route := Parse("/select notification-hooks")
-	if route.Type != RouteToBridge {
-		t.Errorf("Type = %v, want RouteToBridge", route.Type)
-	}
-	if route.Command != "select" {
-		t.Errorf("Command = %q, want %q", route.Command, "select")
-	}
-	if route.Args != "notification-hooks" {
-		t.Errorf("Args = %q, want %q", route.Args, "notification-hooks")
 	}
 }
 
@@ -147,7 +134,7 @@ func TestParseCommand(t *testing.T) {
 	}{
 		{"status", "status", ""},
 		{"status repo1", "status", "repo1"},
-		{"select repo1 extra args", "select", "repo1 extra args"},
+		{"help repo1 extra args", "help", "repo1 extra args"},
 		{"STATUS", "status", ""},
 	}
 

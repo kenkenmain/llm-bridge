@@ -4,6 +4,7 @@ go_library(
     name = "llm",
     srcs = [
         "claude.go",
+        "codex.go",
         "factory.go",
         "llm.go",
     ],
@@ -17,6 +18,7 @@ go_test(
     srcs = [
         "claude_stub_test.go",
         "claude_test.go",
+        "codex_test.go",
         "factory_test.go",
     ],
     embed = [":llm"],
