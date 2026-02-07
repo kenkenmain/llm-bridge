@@ -23,13 +23,10 @@ import (
 )
 
 // LLMFactory creates LLM instances. Defaults to llm.New.
-type LLMFactory func(backend, workingDir, claudePath string, resume bool) (llm.LLM, error)
+type LLMFactory func(backend, workingDir, claudePath, codexPath string, resume bool) (llm.LLM, error)
 
 // DiscordFactory creates Discord provider instances. Defaults to provider.NewDiscord.
 type DiscordFactory func(token string, channelIDs []string) provider.Provider
-
-// TerminalFactory creates Terminal provider instances. Defaults to provider.NewTerminal.
-type TerminalFactory func(channelID string) *provider.Terminal
 
 // GitDetector detects git repository info for a directory.
 type GitDetector func(dir string) (*git.RepoInfo, error)
@@ -44,24 +41,22 @@ type CloneRepoFunc func(url, destDir string) error
 type AddWorktreeFunc func(repoDir, wtDir, branch string) error
 
 type Bridge struct {
-	cfg             *config.Config
-	cfgPath         string
-	providers       map[string]provider.Provider
-	repos           map[string]*repoSession
-	output          *output.Handler
-	discordFactory  DiscordFactory
-	terminalFactory TerminalFactory
-	llmFactory      LLMFactory
-	gitDetector     GitDetector
-	worktreeLister  WorktreeLister
-	cloneRepo       CloneRepoFunc
-	addWorktree     AddWorktreeFunc
+	cfg            *config.Config
+	cfgPath        string
+	providers      map[string]provider.Provider
+	repos          map[string]*repoSession
+	output         *output.Handler
+	discordFactory DiscordFactory
+	llmFactory     LLMFactory
+	gitDetector    GitDetector
+	worktreeLister WorktreeLister
+	cloneRepo      CloneRepoFunc
+	addWorktree    AddWorktreeFunc
 
 	userLimiter    *ratelimit.Limiter
 	channelLimiter *ratelimit.Limiter
 
-	mu               sync.Mutex
-	terminalRepoName string
+	mu sync.Mutex
 }
 
 type repoSession struct {
@@ -69,8 +64,8 @@ type repoSession struct {
 	llm       llm.LLM
 	channels  []channelRef
 	cancelCtx context.CancelFunc
-	merger    *Merger        // per-repo conflict detection
-	gitInfo   *git.RepoInfo  // nil if not a git repo
+	merger    *Merger       // per-repo conflict detection
+	gitInfo   *git.RepoInfo // nil if not a git repo
 }
 
 type channelRef struct {
@@ -80,20 +75,19 @@ type channelRef struct {
 
 func New(cfg *config.Config, cfgPath string) *Bridge {
 	b := &Bridge{
-		cfg:       cfg,
-		cfgPath:   cfgPath,
-		providers: make(map[string]provider.Provider),
-		repos:     make(map[string]*repoSession),
-		output:    output.NewHandler(cfg.Defaults.OutputThreshold),
+		cfg:        cfg,
+		cfgPath:    cfgPath,
+		providers:  make(map[string]provider.Provider),
+		repos:      make(map[string]*repoSession),
+		output:     output.NewHandler(cfg.Defaults.OutputThreshold),
 		llmFactory: llm.New,
 		discordFactory: func(token string, channelIDs []string) provider.Provider {
 			return provider.NewDiscord(token, channelIDs)
 		},
-		terminalFactory: provider.NewTerminal,
-		gitDetector:     git.DetectRepo,
-		worktreeLister:  git.ListWorktrees,
-		cloneRepo:       git.CloneRepo,
-		addWorktree:     git.AddWorktree,
+		gitDetector:    git.DetectRepo,
+		worktreeLister: git.ListWorktrees,
+		cloneRepo:      git.CloneRepo,
+		addWorktree:    git.AddWorktree,
 	}
 
 	if cfg.Defaults.RateLimit.GetRateLimitEnabled() {
@@ -125,15 +119,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 			slog.Info("discord provider started", "channels", len(channelIDs))
 		}
 	}
-
-	// Initialize Terminal (always enabled for local interaction)
-	terminal := b.terminalFactory("terminal")
-	if err := terminal.Start(ctx); err != nil {
-		return fmt.Errorf("start terminal: %w", err)
-	}
-	b.providers["terminal"] = terminal
-	go b.handleTerminalMessages(ctx, terminal)
-	slog.Info("terminal provider started")
 
 	// Start idle timeout checker
 	go b.idleTimeoutLoop(ctx)
@@ -208,8 +193,8 @@ func (b *Bridge) processMessage(ctx context.Context, prov provider.Provider, msg
 
 // isRateLimited checks per-user and per-channel rate limits.
 // Returns true if the message should be rejected.
-// User rate limiting uses AuthorID (stable unique ID), so terminal messages
-// (which have empty AuthorID) are implicitly not user-rate-limited.
+// User rate limiting uses AuthorID (stable unique ID), so messages without an
+// AuthorID are implicitly not user-rate-limited.
 func (b *Bridge) isRateLimited(prov provider.Provider, msg provider.Message) bool {
 	if b.userLimiter == nil || b.channelLimiter == nil {
 		return false
@@ -260,16 +245,15 @@ func (b *Bridge) handleBridgeCommand(prov provider.Provider, channelID string, r
   /status                                - Show LLM status and idle time
   /cancel                                - Send SIGINT to LLM
   /restart                               - Restart LLM process
-  /select <repo>                         - Select repo for terminal
 
 Repo Management:
   /list-repos                            - List all configured repos
-  /clone <url> <name> [channel-id]       - Clone a git repo and register it
+  /clone <url> <name> <channel-id>       - Clone a git repo and register it
   /remove-repo <name>                    - Remove a repo from config
 
 Worktrees:
   /worktrees                             - List git worktrees for current repo
-  /add-worktree <name> <branch> [channel-id] - Create worktree from current repo
+  /add-worktree <name> <branch> <channel-id> - Create worktree from current repo
 
 Skills: ::commit, ::review-pr, etc.`
 	default:
@@ -282,15 +266,14 @@ Skills: ::commit, ::review-pr, etc.`
 }
 
 func (b *Bridge) handleLLMMessage(ctx context.Context, prov provider.Provider, msg provider.Message, route router.Route) {
-	repoName := b.repoForChannel(msg.ChannelID)
-	if repoName == "" {
+	repoName, repo, ok := b.repoConfigForChannel(msg.ChannelID)
+	if !ok {
 		if err := prov.Send(msg.ChannelID, "No repo configured for this channel"); err != nil {
 			slog.Warn("send error failed", "error", err, "channel", msg.ChannelID, "provider", prov.Name())
 		}
 		return
 	}
 
-	repo := b.cfg.Repos[repoName]
 	session, err := b.getOrCreateSession(ctx, repoName, repo, prov)
 	if err != nil {
 		slog.Error("failed to create session", "error", err, "repo", repoName)
@@ -329,7 +312,13 @@ func (b *Bridge) getOrCreateSession(ctx context.Context, repoName string, repo c
 		llmBackend = b.cfg.Defaults.LLM
 	}
 
-	llmInstance, err := b.llmFactory(llmBackend, repo.WorkingDir, b.cfg.Defaults.GetClaudePath(), b.cfg.Defaults.GetResumeSession())
+	llmInstance, err := b.llmFactory(
+		llmBackend,
+		repo.WorkingDir,
+		b.cfg.Defaults.GetClaudePath(),
+		b.cfg.Defaults.GetCodexPath(),
+		b.cfg.Defaults.GetResumeSession(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create llm: %w", err)
 	}
@@ -469,90 +458,6 @@ func (b *Bridge) broadcastOutput(session *repoSession, content string) {
 			}
 		}
 	}
-}
-
-func (b *Bridge) handleTerminalMessages(ctx context.Context, term *provider.Terminal) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-term.Messages():
-			if !ok {
-				return
-			}
-			b.processTerminalMessage(ctx, term, msg)
-		}
-	}
-}
-
-func (b *Bridge) processTerminalMessage(ctx context.Context, term *provider.Terminal, msg provider.Message) {
-	route := router.Parse(msg.Content)
-
-	if route.Type == router.RouteToBridge && route.Command == "select" {
-		if route.Args == "" {
-			var repos []string
-			for name := range b.cfg.Repos {
-				repos = append(repos, name)
-			}
-			_ = term.Send("", fmt.Sprintf("Usage: /select <repo-name>\nAvailable repos: %v\nCurrently selected: %s", repos, b.getTerminalRepo()))
-			return
-		}
-		if _, ok := b.cfg.Repos[route.Args]; !ok {
-			_ = term.Send("", fmt.Sprintf("Unknown repo: %s", route.Args))
-			return
-		}
-		b.mu.Lock()
-		b.terminalRepoName = route.Args
-		b.mu.Unlock()
-		_ = term.Send("", fmt.Sprintf("Selected repo: %s", route.Args))
-		return
-	}
-
-	repoName := b.getTerminalRepo()
-	if repoName == "" {
-		_ = term.Send("", "No repos configured. Add repos to llm-bridge.yaml")
-		return
-	}
-
-	repo := b.cfg.Repos[repoName]
-
-	switch route.Type {
-	case router.RouteToBridge:
-		b.handleBridgeCommand(term, term.ChannelID(), route)
-	case router.RouteToLLM:
-		session, err := b.getOrCreateSession(ctx, repoName, repo, term)
-		if err != nil {
-			slog.Error("failed to create session", "error", err, "repo", repoName)
-			_ = term.Send("", fmt.Sprintf("Error starting LLM: %v", err))
-			return
-		}
-
-		formatted := session.merger.FormatMessage(term.Name(), route.Raw)
-		llmMsg := llm.Message{
-			Source:  term.Name(),
-			Content: formatted,
-		}
-
-		if err := session.llm.Send(llmMsg); err != nil {
-			slog.Error("send to llm failed", "error", err, "repo", repoName)
-			_ = term.Send("", fmt.Sprintf("Error: %v", err))
-		}
-	}
-}
-
-func (b *Bridge) getTerminalRepo() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.terminalRepoName != "" {
-		return b.terminalRepoName
-	}
-
-	for name := range b.cfg.Repos {
-		b.terminalRepoName = name
-		return name
-	}
-	return ""
 }
 
 func (b *Bridge) idleTimeoutLoop(ctx context.Context) {
@@ -700,12 +605,10 @@ func (b *Bridge) restartLLM(channelID string) string {
 }
 
 func (b *Bridge) listWorktrees(channelID string) string {
-	repoName := b.repoForChannel(channelID)
-	if repoName == "" {
+	repoName, repo, ok := b.repoConfigForChannel(channelID)
+	if !ok {
 		return "No repo configured for this channel"
 	}
-
-	repo := b.cfg.Repos[repoName]
 
 	worktrees, err := b.worktreeLister(repo.WorkingDir)
 	if err != nil {
@@ -716,6 +619,18 @@ func (b *Bridge) listWorktrees(channelID string) string {
 		return fmt.Sprintf("No linked worktrees for %s", repoName)
 	}
 
+	// Snapshot repos and sessions under lock to avoid races during iteration
+	b.mu.Lock()
+	reposByDir := make(map[string]string, len(b.cfg.Repos))
+	for name, r := range b.cfg.Repos {
+		reposByDir[r.WorkingDir] = name
+	}
+	activeRepos := make(map[string]bool, len(b.repos))
+	for name, session := range b.repos {
+		activeRepos[name] = session.llm != nil && session.llm.Running()
+	}
+	b.mu.Unlock()
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Worktrees for %s:\n", repoName))
 	for _, wt := range worktrees {
@@ -724,24 +639,9 @@ func (b *Bridge) listWorktrees(channelID string) string {
 			marker = "* "
 		}
 
-		// Check if this worktree has a configured repo
-		configuredRepo := ""
-		for name, r := range b.cfg.Repos {
-			if r.WorkingDir == wt.Path {
-				configuredRepo = name
-				break
-			}
-		}
-
 		line := fmt.Sprintf("  %s%s (%s)", marker, wt.Path, wt.Branch)
-		if configuredRepo != "" {
-			// Check if session exists
-			b.mu.Lock()
-			session, active := b.repos[configuredRepo]
-			isActive := active && session.llm != nil && session.llm.Running()
-			b.mu.Unlock()
-
-			if isActive {
+		if configuredRepo, found := reposByDir[wt.Path]; found {
+			if activeRepos[configuredRepo] {
 				line += fmt.Sprintf(" -> repo: %s [active]", configuredRepo)
 			} else {
 				line += fmt.Sprintf(" -> repo: %s", configuredRepo)
@@ -868,22 +768,23 @@ func (b *Bridge) handleRemoveRepo(args string) string {
 }
 
 // handleClone clones an external repo and registers it as a new llm-bridge repo.
-// Usage: /clone <url> <name> [channel-id]
+// Usage: /clone <url> <name> <channel-id>
 // - url: Git repository URL (required, must use https/git/ssh scheme)
 // - name: Repo name (required, alphanumeric with hyphens/underscores only)
-// - channel-id: For Discord, required; for Terminal, defaults to "terminal-<name>"
+// - channel-id: Required
 func (b *Bridge) handleClone(providerName string, args string) string {
+	if providerName != "discord" {
+		return fmt.Sprintf("Error: provider %q is not supported", providerName)
+	}
+
 	parts := strings.Fields(args)
-	if len(parts) < 2 {
-		return "Usage: /clone <url> <name> [channel-id]"
+	if len(parts) < 3 {
+		return "Usage: /clone <url> <name> <channel-id>"
 	}
 
 	repoURL := parts[0]
 	name := parts[1]
-	var channelID string
-	if len(parts) >= 3 {
-		channelID = parts[2]
-	}
+	channelID := parts[2]
 
 	// Security: validate URL scheme (prevents malicious URLs like ext::, file://)
 	if !git.IsAllowedGitURL(repoURL) {
@@ -898,15 +799,6 @@ func (b *Bridge) handleClone(providerName string, args string) string {
 	// Determine destination directory (always relative to BaseDir)
 	baseDir := b.cfg.Defaults.GetBaseDir()
 	destDir := filepath.Join(baseDir, name)
-
-	// Determine channel ID based on provider
-	if channelID == "" {
-		if providerName == "discord" {
-			return "Error: channel-id is required for Discord"
-		}
-		// Terminal: default to "terminal-<name>"
-		channelID = "terminal-" + name
-	}
 
 	// Clone the repository
 	if err := b.cloneRepo(repoURL, destDir); err != nil {
@@ -934,22 +826,27 @@ func (b *Bridge) handleClone(providerName string, args string) string {
 }
 
 // handleAddWorktree creates a new git worktree from the current repo and registers it.
-// Usage: /add-worktree <name> <branch> [channel-id]
+// Usage: /add-worktree <name> <branch> <channel-id>
 // - name: Worktree name (required, alphanumeric with hyphens/underscores only)
 // - branch: Branch name to create (required)
-// - channel-id: For Discord, required; for Terminal, defaults to "terminal-<parent>/<name>"
-func (b *Bridge) handleAddWorktree(providerName string, parentChannelID string, args string) string {
+// - channel-id: Required
+func (b *Bridge) handleAddWorktree(_ string, parentChannelID string, args string) string {
+	parentRepoName, parentRepo, found := b.repoConfigForChannel(parentChannelID)
+	if !found {
+		return "Error: no repo configured for this channel"
+	}
+	if parentRepo.Provider != "discord" {
+		return fmt.Sprintf("Error: provider %q is not supported", parentRepo.Provider)
+	}
+
 	parts := strings.Fields(args)
-	if len(parts) < 2 {
-		return "Usage: /add-worktree <name> <branch> [channel-id]"
+	if len(parts) < 3 {
+		return "Usage: /add-worktree <name> <branch> <channel-id>"
 	}
 
 	name := parts[0]
 	branch := parts[1]
-	var newChannelID string
-	if len(parts) >= 3 {
-		newChannelID = parts[2]
-	}
+	newChannelID := parts[2]
 
 	// Security: validate name uses only safe characters (alphanumeric, hyphen, underscore)
 	if !git.IsSafeRepoName(name) {
@@ -959,12 +856,6 @@ func (b *Bridge) handleAddWorktree(providerName string, parentChannelID string, 
 	// Validate branch is also safe (alphanumeric, hyphen, underscore, slash for feature branches)
 	if !git.IsSafeRepoName(strings.ReplaceAll(branch, "/", "-")) {
 		return "Error: branch must contain only letters, numbers, hyphens, underscores, and slashes"
-	}
-
-	// Find current repo from channel (atomically get name and config copy)
-	parentRepoName, parentRepo, found := b.repoConfigForChannel(parentChannelID)
-	if !found {
-		return "Error: no repo configured for this channel"
 	}
 
 	// Determine git root: if current repo has GitRoot set (is worktree), use GitRoot; otherwise use WorkingDir
@@ -978,15 +869,6 @@ func (b *Bridge) handleAddWorktree(providerName string, parentChannelID string, 
 
 	// Create child repo name with parent/child naming
 	childName := parentRepoName + "/" + name
-
-	// Determine channel ID based on provider
-	if newChannelID == "" {
-		if providerName == "discord" {
-			return "Error: channel-id is required for Discord"
-		}
-		// Terminal: default to "terminal-<childName>"
-		newChannelID = "terminal-" + childName
-	}
 
 	// Create the worktree
 	if err := b.addWorktree(parentGitRoot, wtDir, branch); err != nil {

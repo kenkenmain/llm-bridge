@@ -25,7 +25,6 @@ var BridgeCommands = map[string]bool{
 	"cancel":       true,
 	"restart":      true,
 	"help":         true,
-	"select":       true,
 	"worktrees":    true,
 	"list-repos":   true,
 	"remove-repo":  true,

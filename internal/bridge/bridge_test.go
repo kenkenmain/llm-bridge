@@ -160,39 +160,6 @@ func TestBridge_RestartLLM_NotRunning(t *testing.T) {
 	}
 }
 
-func TestBridge_GetTerminalRepo(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	// First call auto-selects a repo
-	repo := b.getTerminalRepo()
-	if repo != "test-repo" && repo != "other-repo" {
-		t.Errorf("expected one of the repos, got %q", repo)
-	}
-
-	// Setting explicit repo
-	b.mu.Lock()
-	b.terminalRepoName = "other-repo"
-	b.mu.Unlock()
-
-	repo = b.getTerminalRepo()
-	if repo != "other-repo" {
-		t.Errorf("expected other-repo, got %q", repo)
-	}
-}
-
-func TestBridge_GetTerminalRepo_EmptyConfig(t *testing.T) {
-	cfg := &config.Config{
-		Repos: map[string]config.RepoConfig{},
-	}
-	b := New(cfg, "")
-
-	repo := b.getTerminalRepo()
-	if repo != "" {
-		t.Errorf("expected empty string for no repos, got %q", repo)
-	}
-}
-
 func TestBridge_AddChannelToSession(t *testing.T) {
 	cfg := testConfig()
 	b := New(cfg, "")
@@ -205,7 +172,7 @@ func TestBridge_AddChannelToSession(t *testing.T) {
 	}
 
 	// Add new channel
-	mockProv2 := provider.NewMockProvider("terminal")
+	mockProv2 := provider.NewMockProvider("discord-alt")
 	b.addChannelToSession(session, mockProv2, "channel-2")
 	if len(session.channels) != 2 {
 		t.Errorf("expected 2 channels, got %d", len(session.channels))
@@ -323,7 +290,7 @@ func TestBridge_BroadcastOutput_MultipleChannels(t *testing.T) {
 	b := New(cfg, "")
 
 	mockProv1 := provider.NewMockProvider("discord")
-	mockProv2 := provider.NewMockProvider("terminal")
+	mockProv2 := provider.NewMockProvider("discord-alt")
 	session := &repoSession{
 		name: "test-repo",
 		channels: []channelRef{
@@ -802,127 +769,12 @@ func TestBridge_Stop_WithSessions(t *testing.T) {
 	}
 }
 
-func TestBridge_ProcessTerminalMessage_SelectNoArgs(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-	// Override writer to capture output
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "/select",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-	// Test passes if no panic - output goes to writer
-}
-
-func TestBridge_ProcessTerminalMessage_SelectUnknownRepo(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "/select nonexistent",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-	// Test passes if no panic
-}
-
-func TestBridge_ProcessTerminalMessage_SelectValidRepo(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "/select test-repo",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-
-	b.mu.Lock()
-	selected := b.terminalRepoName
-	b.mu.Unlock()
-
-	if selected != "test-repo" {
-		t.Errorf("expected selected repo 'test-repo', got %q", selected)
-	}
-}
-
-func TestBridge_ProcessTerminalMessage_NoRepos(t *testing.T) {
-	cfg := &config.Config{
-		Repos: map[string]config.RepoConfig{},
-	}
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "do something",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-	// Test passes if no panic - "No repos configured" is sent to terminal
-}
-
-func TestBridge_ProcessTerminalMessage_BridgeCommand(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "/status",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-	// Test passes if no panic
-}
-
-func TestBridge_ProcessTerminalMessage_LLMRoute(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	mockLLM := newMockLLM("claude")
-	mockLLM.setRunning(true)
-
-	b.repos["test-repo"] = &repoSession{
-		name:     "test-repo",
-		llm:      mockLLM,
-		channels: []channelRef{},
-		merger:   NewMerger(2 * time.Second),
-	}
-	b.terminalRepoName = "test-repo"
-
-	term := provider.NewTerminal("terminal")
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "build the project",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-
-	sentMsgs := mockLLM.getSentMessages()
-	if len(sentMsgs) != 1 {
-		t.Fatalf("expected 1 LLM message, got %d", len(sentMsgs))
-	}
-}
-
 func TestBridge_GetOrCreateSession_NewSession(t *testing.T) {
 	cfg := testConfig()
 	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+	b.llmFactory = func(backend, workDir, claudePath, codexPath string, resume bool) (llm.LLM, error) {
 		return mockLLM, nil
 	}
 
@@ -938,6 +790,57 @@ func TestBridge_GetOrCreateSession_NewSession(t *testing.T) {
 	}
 	if len(session.channels) != 1 {
 		t.Errorf("expected 1 channel, got %d", len(session.channels))
+	}
+}
+
+func TestBridge_GetOrCreateSession_PassesBackendAndPaths(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos["test-repo"] = config.RepoConfig{
+		Provider:   "discord",
+		ChannelID:  "channel-123",
+		LLM:        "codex",
+		WorkingDir: "/tmp/test",
+	}
+	cfg.Defaults.ClaudePath = "/usr/local/bin/claude-custom"
+	cfg.Defaults.CodexPath = "/usr/local/bin/codex-custom"
+	resume := false
+	cfg.Defaults.ResumeSession = &resume
+
+	b := New(cfg, "")
+	mockLLM := newMockLLM("codex")
+
+	var gotBackend, gotWorkDir, gotClaudePath, gotCodexPath string
+	var gotResume bool
+	b.llmFactory = func(backend, workDir, claudePath, codexPath string, resume bool) (llm.LLM, error) {
+		gotBackend = backend
+		gotWorkDir = workDir
+		gotClaudePath = claudePath
+		gotCodexPath = codexPath
+		gotResume = resume
+		return mockLLM, nil
+	}
+
+	mockProv := provider.NewMockProvider("discord")
+	repo := cfg.Repos["test-repo"]
+
+	if _, err := b.getOrCreateSession(context.Background(), "test-repo", repo, mockProv); err != nil {
+		t.Fatalf("getOrCreateSession error = %v", err)
+	}
+
+	if gotBackend != "codex" {
+		t.Errorf("llmFactory backend = %q, want %q", gotBackend, "codex")
+	}
+	if gotWorkDir != "/tmp/test" {
+		t.Errorf("llmFactory workDir = %q, want %q", gotWorkDir, "/tmp/test")
+	}
+	if gotClaudePath != "/usr/local/bin/claude-custom" {
+		t.Errorf("llmFactory claudePath = %q, want %q", gotClaudePath, "/usr/local/bin/claude-custom")
+	}
+	if gotCodexPath != "/usr/local/bin/codex-custom" {
+		t.Errorf("llmFactory codexPath = %q, want %q", gotCodexPath, "/usr/local/bin/codex-custom")
+	}
+	if gotResume != false {
+		t.Errorf("llmFactory resume = %v, want false", gotResume)
 	}
 }
 
@@ -970,7 +873,7 @@ func TestBridge_GetOrCreateSession_FactoryError(t *testing.T) {
 	cfg := testConfig()
 	b := New(cfg, "")
 
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+	b.llmFactory = func(backend, workDir, claudePath, codexPath string, resume bool) (llm.LLM, error) {
 		return nil, fmt.Errorf("factory error")
 	}
 
@@ -988,7 +891,7 @@ func TestBridge_HandleLLMMessage_CreatesSession(t *testing.T) {
 	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+	b.llmFactory = func(backend, workDir, claudePath, codexPath string, resume bool) (llm.LLM, error) {
 		return mockLLM, nil
 	}
 
@@ -1008,51 +911,6 @@ func TestBridge_HandleLLMMessage_CreatesSession(t *testing.T) {
 	}
 }
 
-func TestBridge_ProcessTerminalMessage_CreatesSession(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-	b.terminalRepoName = "test-repo"
-
-	mockLLM := newMockLLM("claude")
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
-		return mockLLM, nil
-	}
-
-	term := provider.NewTerminal("terminal")
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "do work",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-
-	sentMsgs := mockLLM.getSentMessages()
-	if len(sentMsgs) != 1 {
-		t.Fatalf("expected 1 LLM message, got %d", len(sentMsgs))
-	}
-}
-
-func TestBridge_ProcessTerminalMessage_SessionCreateError(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-	b.terminalRepoName = "test-repo"
-
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
-		return nil, fmt.Errorf("spawn failed")
-	}
-
-	term := provider.NewTerminal("terminal")
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "do work",
-		Source:    "terminal",
-	}
-
-	b.processTerminalMessage(context.Background(), term, msg)
-	// Should not panic - error goes to terminal
-}
-
 // Tests for Start method
 func TestBridge_Start_NoProviders(t *testing.T) {
 	cfg := &config.Config{
@@ -1068,24 +926,6 @@ func TestBridge_Start_NoProviders(t *testing.T) {
 	err := b.Start(ctx)
 	if err != nil {
 		t.Errorf("Start() error = %v", err)
-	}
-}
-
-func TestBridge_Start_WithTerminal(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	err := b.Start(ctx)
-	if err != nil {
-		t.Errorf("Start() error = %v", err)
-	}
-
-	// Terminal provider should have been started
-	if _, ok := b.providers["terminal"]; !ok {
-		t.Error("terminal provider should be registered")
 	}
 }
 
@@ -1189,53 +1029,6 @@ func TestBridge_Start_NoChannelsForDiscord(t *testing.T) {
 
 	if discordFactoryCalled {
 		t.Error("discord factory should not be called when no channels use discord")
-	}
-}
-
-// Tests for handleTerminalMessages
-func TestBridge_HandleTerminalMessages_ContextCancel(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan bool)
-	go func() {
-		b.handleTerminalMessages(ctx, term)
-		done <- true
-	}()
-
-	cancel()
-
-	select {
-	case <-done:
-		// handleTerminalMessages exited
-	case <-time.After(100 * time.Millisecond):
-		t.Error("handleTerminalMessages should exit when context is cancelled")
-	}
-}
-
-func TestBridge_HandleTerminalMessages_ChannelClosed(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-	ctx := context.Background()
-
-	done := make(chan bool)
-	go func() {
-		b.handleTerminalMessages(ctx, term)
-		done <- true
-	}()
-
-	_ = term.Stop() // Closes the messages channel
-
-	select {
-	case <-done:
-		// handleTerminalMessages exited
-	case <-time.After(100 * time.Millisecond):
-		t.Error("handleTerminalMessages should exit when channel is closed")
 	}
 }
 
@@ -1407,9 +1200,9 @@ func TestBridge_New_LimitersNilWhenDisabled(t *testing.T) {
 func TestBridge_RateLimitedUser(t *testing.T) {
 	cfg := testConfig()
 	cfg.Defaults.RateLimit = config.RateLimitConfig{
-		UserRate:     0.1,  // very slow refill
-		UserBurst:    1,    // only 1 allowed
-		ChannelRate:  100,  // high channel limit so it doesn't interfere
+		UserRate:     0.1, // very slow refill
+		UserBurst:    1,   // only 1 allowed
+		ChannelRate:  100, // high channel limit so it doesn't interfere
 		ChannelBurst: 100,
 	}
 	b := New(cfg, "")
@@ -1622,34 +1415,6 @@ func TestBridge_RateLimitDisabled(t *testing.T) {
 	}
 }
 
-func TestBridge_RateLimitTerminalBypass(t *testing.T) {
-	cfg := testConfig()
-	cfg.Defaults.RateLimit = config.RateLimitConfig{
-		UserRate:     0.001, // extremely slow
-		UserBurst:    0,     // zero burst - would block everything
-		ChannelRate:  100,   // high channel rate
-		ChannelBurst: 100,
-	}
-	b := New(cfg, "")
-
-	mockProv := provider.NewMockProvider("discord")
-
-	// Terminal messages have empty AuthorID, so user rate limiting is skipped
-	msg := provider.Message{
-		ChannelID: "channel-123",
-		Content:   "hello",
-		Author:    "terminal-user",
-		AuthorID:  "", // empty = terminal
-		Source:    "terminal",
-	}
-
-	// isRateLimited should return false for terminal (no AuthorID)
-	result := b.isRateLimited(mockProv, msg)
-	if result {
-		t.Error("terminal messages (empty AuthorID) should not be user-rate-limited")
-	}
-}
-
 func TestBridge_RateLimitDifferentUsersIndependent(t *testing.T) {
 	cfg := testConfig()
 	cfg.Defaults.RateLimit = config.RateLimitConfig{
@@ -1819,7 +1584,7 @@ func TestBridge_GetOrCreateSession_DetectsGit(t *testing.T) {
 	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+	b.llmFactory = func(backend, workDir, claudePath, codexPath string, resume bool) (llm.LLM, error) {
 		return mockLLM, nil
 	}
 
@@ -1860,7 +1625,7 @@ func TestBridge_GetOrCreateSession_GitDetectionFailure(t *testing.T) {
 	b := New(cfg, "")
 
 	mockLLM := newMockLLM("claude")
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+	b.llmFactory = func(backend, workDir, claudePath, codexPath string, resume bool) (llm.LLM, error) {
 		return mockLLM, nil
 	}
 
@@ -2097,6 +1862,9 @@ func TestBridge_HandleBridgeCommand_Help_IncludesWorktrees(t *testing.T) {
 	if !strings.Contains(msgs[0].Content, "/worktrees") {
 		t.Errorf("expected '/worktrees' in help output, got %q", msgs[0].Content)
 	}
+	if strings.Contains(msgs[0].Content, "/select") {
+		t.Errorf("did not expect '/select' in help output, got %q", msgs[0].Content)
+	}
 }
 
 func testConfigWithWorktrees() *config.Config {
@@ -2114,12 +1882,6 @@ func testConfigWithWorktrees() *config.Config {
 				LLM:        "claude",
 				WorkingDir: "/tmp/myproject-feature",
 				GitRoot:    "/tmp/myproject",
-			},
-			"other-repo": {
-				Provider:   "terminal",
-				ChannelID:  "terminal",
-				LLM:        "claude",
-				WorkingDir: "/tmp/other",
 			},
 		},
 		Defaults: config.NewDefaults(),
@@ -2143,13 +1905,6 @@ func TestBridge_ChannelIDsForProvider_WithWorktreeRepos(t *testing.T) {
 		t.Errorf("missing expected discord channel IDs: %v", discordIDs)
 	}
 
-	terminalIDs := b.channelIDsForProvider("terminal")
-	if len(terminalIDs) != 1 {
-		t.Errorf("expected 1 terminal channel ID, got %d", len(terminalIDs))
-	}
-	if len(terminalIDs) == 1 && terminalIDs[0] != "terminal" {
-		t.Errorf("expected terminal channel ID 'terminal', got %q", terminalIDs[0])
-	}
 }
 
 func TestBridge_RepoForChannel_WorktreeChild(t *testing.T) {
@@ -2178,7 +1933,7 @@ func TestBridge_HandleLLMMessage_WorktreeChildChannel(t *testing.T) {
 
 	var capturedWorkDir string
 	mockLLM := newMockLLM("claude")
-	b.llmFactory = func(backend, workDir, claudePath string, resume bool) (llm.LLM, error) {
+	b.llmFactory = func(backend, workDir, claudePath, codexPath string, resume bool) (llm.LLM, error) {
 		capturedWorkDir = workDir
 		return mockLLM, nil
 	}
@@ -2248,102 +2003,6 @@ func TestBridge_Start_WithDiscord_WorktreeChannels(t *testing.T) {
 	if !found["channel-100"] || !found["channel-200"] {
 		t.Errorf("discord factory missing expected channel IDs: %v", capturedChannelIDs)
 	}
-}
-
-func TestBridge_ProcessTerminalMessage_SelectPathTraversal(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-
-	// Test various path traversal attempts
-	pathTraversalCases := []string{
-		"/select ../etc/passwd",
-		"/select ../../secret",
-		"/select test-repo/../other",
-		"/select ./test-repo",
-		"/select test-repo/./sub",
-	}
-
-	for _, content := range pathTraversalCases {
-		msg := provider.Message{
-			ChannelID: "terminal",
-			Content:   content,
-			Source:    "terminal",
-		}
-
-		// Should not panic
-		b.processTerminalMessage(context.Background(), term, msg)
-
-		// Verify the path traversal string was not selected as repo name
-		b.mu.Lock()
-		selected := b.terminalRepoName
-		b.mu.Unlock()
-
-		// The repo name should not contain path traversal characters
-		if strings.Contains(selected, "..") || strings.Contains(selected, "./") {
-			t.Errorf("path traversal string should not be selected as repo name: %q", selected)
-		}
-	}
-
-	// Test passes if no panics occurred
-}
-
-func TestBridge_ProcessTerminalMessage_SelectVeryLong(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-
-	// Create a very long repo name (1000+ characters)
-	longRepoName := strings.Repeat("a", 1500)
-	msg := provider.Message{
-		ChannelID: "terminal",
-		Content:   "/select " + longRepoName,
-		Source:    "terminal",
-	}
-
-	// Should not panic even with very long input
-	b.processTerminalMessage(context.Background(), term, msg)
-
-	// Verify the very long string was not selected (it's not a valid repo)
-	b.mu.Lock()
-	selected := b.terminalRepoName
-	b.mu.Unlock()
-
-	if selected == longRepoName {
-		t.Error("very long string should not be selected as repo name (not in config)")
-	}
-
-	// Test passes if no panic occurred
-}
-
-func TestBridge_ProcessTerminalMessage_SelectWhitespaceOnly(t *testing.T) {
-	cfg := testConfig()
-	b := New(cfg, "")
-
-	term := provider.NewTerminal("terminal")
-
-	// Test whitespace-only args
-	whitespaceCases := []string{
-		"/select    ",      // spaces only
-		"/select \t",       // tab
-		"/select \n",       // newline
-		"/select   \t  \n", // mixed whitespace
-	}
-
-	for _, content := range whitespaceCases {
-		msg := provider.Message{
-			ChannelID: "terminal",
-			Content:   content,
-			Source:    "terminal",
-		}
-
-		// Should not panic
-		b.processTerminalMessage(context.Background(), term, msg)
-	}
-
-	// Test passes if no panics occurred - whitespace args should be handled gracefully
 }
 
 func TestBridge_HandleListRepos_NoRepos(t *testing.T) {
@@ -3182,7 +2841,7 @@ func TestBridge_HandleClone_MissingArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := b.handleClone("discord", tt.args)
-			if result != "Usage: /clone <url> <name> [channel-id]" {
+			if result != "Usage: /clone <url> <name> <channel-id>" {
 				t.Errorf("expected usage message, got %q", result)
 			}
 		})
@@ -3199,9 +2858,9 @@ func TestBridge_HandleClone_PathTraversal(t *testing.T) {
 		t.Errorf("expected safe name error, got %q", result)
 	}
 
-	result = b.handleClone("terminal", "https://github.com/example/repo foo/../bar")
-	if !strings.Contains(result, "must contain only letters, numbers, hyphens, and underscores") {
-		t.Errorf("expected safe name error, got %q", result)
+	result = b.handleClone("unsupported", "https://github.com/example/repo foo/../bar")
+	if !strings.Contains(result, "provider \"unsupported\" is not supported") {
+		t.Errorf("expected unsupported provider error, got %q", result)
 	}
 }
 
@@ -3215,39 +2874,41 @@ func TestBridge_HandleClone_DiscordRequiresChannelID(t *testing.T) {
 	}
 
 	result := b.handleClone("discord", "https://github.com/example/repo myrepo")
-	if !strings.Contains(result, "channel-id is required for Discord") {
-		t.Errorf("expected channel-id required error, got %q", result)
+	if result != "Usage: /clone <url> <name> <channel-id>" {
+		t.Errorf("expected usage error, got %q", result)
 	}
 }
 
-func TestBridge_HandleClone_TerminalDefaultsChannelID(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
+func TestBridge_HandleClone_RejectsUnsupportedProvider(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
 
-	cfg := &config.Config{
-		Repos:    make(map[string]config.RepoConfig),
-		Defaults: config.NewDefaults(),
+	result := b.handleClone("unsupported", "https://github.com/example/repo myrepo")
+	if !strings.Contains(result, "provider \"unsupported\" is not supported") {
+		t.Errorf("expected unsupported provider error, got %q", result)
 	}
-	b := New(cfg, cfgPath)
+}
 
-	cloneCalled := false
-	b.cloneRepo = func(url, destDir string) error {
-		cloneCalled = true
-		if url != "https://github.com/example/repo" {
-			t.Errorf("unexpected url: %q", url)
-		}
-		return nil
+func TestBridge_HandleClone_URLSchemeRejection(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
+
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"http scheme", "http://github.com/example/repo"},
+		{"file scheme", "file:///etc/passwd"},
+		{"ext scheme", "ext::ssh -o ProxyCommand=malicious"},
 	}
 
-	result := b.handleClone("terminal", "https://github.com/example/repo myrepo")
-	if !cloneCalled {
-		t.Error("cloneRepo mock was not called")
-	}
-	if !strings.Contains(result, "Cloned and registered repo") {
-		t.Errorf("expected success message, got %q", result)
-	}
-	if !strings.Contains(result, "terminal-myrepo") {
-		t.Errorf("expected default channel-id 'terminal-myrepo' in response, got %q", result)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := b.handleClone("discord", tt.url+" myrepo channel-123")
+			if !strings.Contains(result, "URL must use https, git, or ssh scheme") {
+				t.Errorf("expected URL scheme error for %q, got %q", tt.url, result)
+			}
+		})
 	}
 }
 
@@ -3320,37 +2981,13 @@ func TestBridge_HandleClone_Success_Discord(t *testing.T) {
 	}
 }
 
-func TestBridge_HandleClone_Success_Terminal(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
+func TestBridge_HandleClone_Success_UnsupportedProvider(t *testing.T) {
+	cfg := testConfig()
+	b := New(cfg, "")
 
-	cfg := &config.Config{
-		Repos:    make(map[string]config.RepoConfig),
-		Defaults: config.NewDefaults(),
-	}
-	b := New(cfg, cfgPath)
-
-	b.cloneRepo = func(url, destDir string) error {
-		return nil
-	}
-
-	result := b.handleClone("terminal", "https://github.com/example/repo myrepo my-channel")
-
-	if !strings.Contains(result, "Cloned and registered repo") {
-		t.Errorf("expected success message, got %q", result)
-	}
-
-	b.mu.Lock()
-	repo, ok := b.cfg.Repos["myrepo"]
-	b.mu.Unlock()
-	if !ok {
-		t.Fatal("repo was not added to memory")
-	}
-	if repo.Provider != "terminal" {
-		t.Errorf("repo.Provider = %q, want %q", repo.Provider, "terminal")
-	}
-	if repo.ChannelID != "my-channel" {
-		t.Errorf("repo.ChannelID = %q, want %q", repo.ChannelID, "my-channel")
+	result := b.handleClone("unsupported", "https://github.com/example/repo myrepo my-channel")
+	if !strings.Contains(result, "provider \"unsupported\" is not supported") {
+		t.Errorf("expected unsupported provider error, got %q", result)
 	}
 }
 
@@ -3365,8 +3002,8 @@ func TestBridge_HandleClone_AbsolutePathRejected(t *testing.T) {
 	}
 	b := New(cfg, cfgPath)
 
-	// Absolute paths are now rejected - names must be safe alphanumeric
-	result := b.handleClone("terminal", "https://github.com/example/repo "+targetDir)
+	// Absolute paths are rejected - names must be safe alphanumeric.
+	result := b.handleClone("discord", "https://github.com/example/repo "+targetDir+" channel-123")
 
 	if !strings.Contains(result, "must contain only letters, numbers, hyphens, and underscores") {
 		t.Errorf("expected safe name error, got %q", result)
@@ -3393,7 +3030,7 @@ func TestBridge_HandleClone_CustomBaseDir(t *testing.T) {
 		return nil
 	}
 
-	result := b.handleClone("terminal", "https://github.com/example/repo myrepo")
+	result := b.handleClone("discord", "https://github.com/example/repo myrepo channel-123")
 
 	expectedDir := filepath.Join(baseDir, "myrepo")
 	if clonedDir != expectedDir {
@@ -3416,7 +3053,7 @@ func TestBridge_HandleClone_RuntimeAddRepoError(t *testing.T) {
 		return nil
 	}
 
-	result := b.handleClone("terminal", "https://github.com/example/repo myrepo")
+	result := b.handleClone("discord", "https://github.com/example/repo myrepo channel-123")
 
 	if !strings.Contains(result, "Cloned but failed to register") {
 		t.Errorf("expected register error message, got %q", result)
@@ -3463,7 +3100,7 @@ func TestBridge_HandleAddWorktree_NoArgs(t *testing.T) {
 	b := New(cfg, "")
 
 	result := b.handleAddWorktree("discord", "channel-123", "")
-	if result != "Usage: /add-worktree <name> <branch> [channel-id]" {
+	if result != "Usage: /add-worktree <name> <branch> <channel-id>" {
 		t.Errorf("expected usage message, got %q", result)
 	}
 }
@@ -3473,7 +3110,7 @@ func TestBridge_HandleAddWorktree_OnlyName(t *testing.T) {
 	b := New(cfg, "")
 
 	result := b.handleAddWorktree("discord", "channel-123", "myworktree")
-	if result != "Usage: /add-worktree <name> <branch> [channel-id]" {
+	if result != "Usage: /add-worktree <name> <branch> <channel-id>" {
 		t.Errorf("expected usage message, got %q", result)
 	}
 }
@@ -3515,20 +3152,20 @@ func TestBridge_HandleAddWorktree_DiscordNoChannelID(t *testing.T) {
 	b := New(cfg, "")
 
 	result := b.handleAddWorktree("discord", "channel-123", "myworktree feature-branch")
-	if !strings.Contains(result, "channel-id is required for Discord") {
-		t.Errorf("expected channel-id required error, got %q", result)
+	if result != "Usage: /add-worktree <name> <branch> <channel-id>" {
+		t.Errorf("expected usage error, got %q", result)
 	}
 }
 
-func TestBridge_HandleAddWorktree_TerminalAutoChannelID(t *testing.T) {
+func TestBridge_HandleAddWorktree_RejectsUnsupportedProvider(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 
 	cfg := &config.Config{
 		Repos: map[string]config.RepoConfig{
 			"test-repo": {
-				Provider:   "terminal",
-				ChannelID:  "terminal",
+				Provider:   "unsupported",
+				ChannelID:  "channel-123",
 				LLM:        "claude",
 				WorkingDir: "/tmp/test",
 			},
@@ -3537,34 +3174,9 @@ func TestBridge_HandleAddWorktree_TerminalAutoChannelID(t *testing.T) {
 	}
 	b := New(cfg, cfgPath)
 
-	addWorktreeCalled := false
-	var capturedGitRoot, capturedWtDir, capturedBranch string
-	b.addWorktree = func(repoDir, wtDir, branch string) error {
-		addWorktreeCalled = true
-		capturedGitRoot = repoDir
-		capturedWtDir = wtDir
-		capturedBranch = branch
-		return nil
-	}
-
-	result := b.handleAddWorktree("terminal", "terminal", "myworktree feature-branch")
-	if !addWorktreeCalled {
-		t.Fatal("addWorktree was not called")
-	}
-	if capturedGitRoot != "/tmp/test" {
-		t.Errorf("git root = %q, want %q", capturedGitRoot, "/tmp/test")
-	}
-	if capturedWtDir != "/tmp/test-myworktree" {
-		t.Errorf("worktree dir = %q, want %q", capturedWtDir, "/tmp/test-myworktree")
-	}
-	if capturedBranch != "feature-branch" {
-		t.Errorf("branch = %q, want %q", capturedBranch, "feature-branch")
-	}
-	if !strings.Contains(result, "Created worktree") {
-		t.Errorf("expected success message, got %q", result)
-	}
-	if !strings.Contains(result, "terminal-test-repo/myworktree") {
-		t.Errorf("expected auto-generated channel ID in result, got %q", result)
+	result := b.handleAddWorktree("unsupported", "channel-123", "myworktree feature-branch")
+	if !strings.Contains(result, "provider \"unsupported\" is not supported") {
+		t.Errorf("expected unsupported provider error, got %q", result)
 	}
 }
 

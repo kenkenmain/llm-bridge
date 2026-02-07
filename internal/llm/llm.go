@@ -8,7 +8,7 @@ import (
 
 // Message represents input from a source
 type Message struct {
-	Source  string // "discord", "terminal"
+	Source  string // "discord"
 	Content string
 }
 

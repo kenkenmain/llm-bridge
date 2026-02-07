@@ -44,9 +44,9 @@ func TestMerger_MultipleSources_Prefix(t *testing.T) {
 		t.Errorf("first message should not have prefix, got %q", msg1)
 	}
 
-	// Second message from terminal within window - gets prefix
-	msg2 := m.FormatMessage("terminal", "from terminal")
-	if !strings.HasPrefix(msg2, "[terminal]") {
+	// Second message from web within window - gets prefix
+	msg2 := m.FormatMessage("web", "from web")
+	if !strings.HasPrefix(msg2, "[web]") {
 		t.Errorf("second source should have prefix, got %q", msg2)
 	}
 
@@ -63,9 +63,9 @@ func TestMerger_ConflictExpires(t *testing.T) {
 	// First from discord
 	m.FormatMessage("discord", "msg1")
 
-	// Second from terminal
-	msg2 := m.FormatMessage("terminal", "msg2")
-	if !strings.HasPrefix(msg2, "[terminal]") {
+	// Second from web
+	msg2 := m.FormatMessage("web", "msg2")
+	if !strings.HasPrefix(msg2, "[web]") {
 		t.Errorf("expected prefix during conflict, got %q", msg2)
 	}
 
@@ -84,11 +84,11 @@ func TestMerger_ThreeSources(t *testing.T) {
 
 	// All three sources send within window
 	m.FormatMessage("discord", "1")
-	msg2 := m.FormatMessage("terminal", "2")
+	msg2 := m.FormatMessage("mobile", "2")
 	msg3 := m.FormatMessage("web", "3")
 
-	if !strings.HasPrefix(msg2, "[terminal]") {
-		t.Errorf("terminal should have prefix, got %q", msg2)
+	if !strings.HasPrefix(msg2, "[mobile]") {
+		t.Errorf("mobile should have prefix, got %q", msg2)
 	}
 	if !strings.HasPrefix(msg3, "[web]") {
 		t.Errorf("web should have prefix, got %q", msg3)

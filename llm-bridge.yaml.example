@@ -41,11 +41,12 @@ defaults:
   # Must be absolute path or "." (defaults to "." if not set)
   base_dir: /home/user/repos
 
-  llm: claude
+  llm: claude  # or codex
   claude_path: claude  # or /usr/local/bin/claude for specific version
+  codex_path: codex    # or /usr/local/bin/codex for specific version
   output_threshold: 1500  # characters before output becomes file attachment
   idle_timeout: 10m       # stop LLM after this idle period
-  resume_session: true    # resume previous Claude session on restart
+  resume_session: true    # resume previous LLM session on restart
 
   rate_limit:
     enabled: true

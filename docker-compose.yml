@@ -14,9 +14,6 @@ services:
       - /root/projects:/root/projects
       # Persist Claude session data
       - claude-data:/root/.claude
-    # For terminal access (interactive mode)
-    stdin_open: true
-    tty: true
 
 volumes:
   claude-data:

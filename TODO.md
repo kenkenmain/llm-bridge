@@ -1,286 +1,258 @@
-# llm-bridge Feature Porting TODO
+# llm-bridge Parity TODO (vs claude-code-discord)
 
-Features to port from [zebbern/claude-code-discord](https://github.com/zebbern/claude-code-discord) to [llm-bridge](https://github.com/anthropics/llm-bridge).
+Source baseline:
+- https://github.com/zebbern/claude-code-discord
 
-## Architecture Note
+Last reviewed:
+- 2026-02-07
 
-| Aspect | zebbern (TypeScript/Deno) | llm-bridge (Go) |
-|--------|---------------------------|-----------------|
-| **Auth** | APPLICATION_ID | CHANNEL_ID |
-| **Routing** | Dynamic channel creation | Pre-configured channel→repo mapping |
-| **PTY** | Piped I/O (no PTY) | True PTY via `creack/pty` |
-| **ANSI** | No ANSI escapes | Raw ANSI output (needs stripping) |
-
-**Key Difference:** zebbern uses Discord APPLICATION_ID for bot authentication with dynamic channel creation within a category. llm-bridge uses CHANNEL_ID as the primary routing key with pre-configured repos.
-
-## PTY vs Piped I/O Comparison
-
-Why does llm-bridge use PTY while zebbern uses pipes? Here's the trade-off:
-
-| Aspect | Piped I/O (zebbern) | PTY (llm-bridge) |
-|--------|---------------------|------------------|
-| **Output** | Clean text, no escapes | Raw ANSI sequences |
-| **Complexity** | Simple | Needs ANSI stripping |
-| **Signal handling** | Manual process kill | `SIGINT` propagates naturally |
-| **Terminal detection** | CLI sees non-TTY | CLI sees real terminal |
-| **Interactive features** | Disabled/limited | Full support (menus, prompts) |
-| **Colors/formatting** | Often disabled | Full terminal colors |
-| **Cross-platform** | Consistent | Windows PTY is newer |
-| **Claude CLI behavior** | Basic output mode | Rich output mode |
-
-### Verdict: PTY is better for Claude CLI
-
-**Reasons:**
-1. **Signal propagation** - `/cancel` needs `SIGINT` to reach Claude's process group
-2. **Rich output** - Claude CLI detects TTY and enables better formatting
-3. **Interactive features** - Session resume, prompts, progress indicators work
-4. **Terminal behavior** - Line buffering, cursor control behave correctly
-
-**The fix:** Don't switch to pipes — strip ANSI escapes before sending to Discord:
-
-```go
-import "github.com/charmbracelet/x/ansi"
-
-cleaned := ansi.Strip(rawPtyOutput)  // Remove escape sequences
-provider.Send(channelID, cleaned)     // Send clean text to Discord
-```
-
-**zebbern's approach** avoids ANSI complexity by not using PTY, but loses terminal features that Claude CLI expects.
+Scope:
+- Track feature parity gaps and quality-of-life improvements relative to `claude-code-discord`.
+- Focus on current `llm-bridge` architecture (Discord-first, no local terminal provider).
 
 ---
 
-## Priority Legend
+## Recently Applied (This Branch)
 
-- **P1:** Critical - Blocking issues or high-value features
-- **P2:** High - Important features for parity
-- **P3:** Medium - Nice-to-have features
-- **P4:** Low - Future consideration
-
----
-
-## Already Implemented in llm-bridge ✅
-
-- [x] Discord bot integration (`discordgo`)
-- [x] Terminal provider (stdin/stdout)
-- [x] `/status` - Show LLM status and idle time
-- [x] `/cancel` - Send SIGINT to LLM
-- [x] `/restart` - Restart LLM process
-- [x] `/help` - Show available commands
-- [x] `/clone <url> <name> <channel-id>` - Clone and register repo
-- [x] `/add-worktree <name> <branch> <channel-id>` - Create git worktree
-- [x] `/worktrees` - List git worktrees
-- [x] `/list-repos` - List configured repos
-- [x] `/remove-repo <name>` - Unregister repo
-- [x] `/select <repo>` - Terminal repo selection
-- [x] Rate limiting (per-user, per-channel token bucket)
-- [x] Large output as file attachment (>1500 chars)
-- [x] Git branch display in status
-- [x] Session resume (`--resume` flag)
-- [x] Idle timeout auto-stop (10m default)
-- [x] `::skill` → `/skill` translation for LLM
+- [x] Added Codex backend implementation and wiring (`llm: codex`, `defaults.codex_path`)
+- [x] Removed terminal provider code and tests entirely
+- [x] Removed `/select` as a bridge command; `/select ...` now routes to LLM as plain slash input
+- [x] Restricted dynamic repo/worktree flows to Discord provider
+- [x] Enforced explicit `channel-id` in `/clone` and `/add-worktree`
+- [x] Updated docs/config examples to reflect Discord-only operation
+- [x] Full `bazel test //...` passes after removal/refactor
 
 ---
 
-## P1: Critical 🔴
+## Current State Snapshot
 
-### ANSI Escape Sequence Handling
+Current architecture:
+- Discord provider only
+- Repo-per-channel routing via config
+- PTY-backed LLM sessions (`claude` and `codex`)
+- Session lifecycle commands (`/status`, `/cancel`, `/restart`)
+- Dynamic repo/worktree registration (`/clone`, `/add-worktree`)
+- Rate limiting, idle timeout, output attachment fallback
 
-**Issue:** PTY output contains ANSI escape sequences (colors, cursor movement) that appear as garbled text in Discord.
+Current bridge commands:
+- `/help`
+- `/status`
+- `/cancel`
+- `/restart`
+- `/worktrees`
+- `/list-repos`
+- `/clone <url> <name> <channel-id>`
+- `/add-worktree <name> <branch> <channel-id>`
+- `/remove-repo <name>`
 
-**Solution:** Strip ANSI escapes before sending to Discord.
-
-| Item | Details |
-|------|---------|
-| Files | `internal/output/output.go`, `go.mod` |
-| Go Library | `github.com/charmbracelet/x/ansi` → `ansi.Strip()` |
-| Test | Capture Claude output sample, verify clean output |
-
-```go
-import "github.com/charmbracelet/x/ansi"
-cleaned := ansi.Strip(rawPtyOutput)
-```
-
-### Todo Management (`/todos`)
-
-**zebbern implementation:**
-- Actions: list, add, complete, generate, prioritize
-- Priority levels: low, medium, high, critical
-- Persistence: JSON file (`todos.json` in `.bot-data/`)
-- Data: id, text, priority, completed, source, line, timestamps
-
-**llm-bridge implementation:**
-
-- [ ] `/todos list` - List all tracked todos
-- [ ] `/todos add <text> [priority]` - Add new todo (default: medium)
-- [ ] `/todos complete <id>` - Mark todo complete
-- [ ] `/todos delete <id>` - Remove todo
-- [ ] `/todos generate` - Ask Claude to generate todos from context
-- [ ] `/todos prioritize` - Ask Claude to prioritize todos
-
-| Item | Details |
-|------|---------|
-| Files | `internal/todo/todo.go`, `internal/todo/todo_test.go` |
-| Persistence | JSON at `{working_dir}/.llm-bridge/todos.json` |
-| Data Structure | Same as zebbern: id, text, priority, completed, timestamps |
-| Router | Add to `BridgeCommands` map in `internal/router/router.go` |
-| Handler | Add switch cases in `internal/bridge/bridge.go` |
+Current config highlights:
+- `defaults.llm` supports `claude` and `codex`
+- `defaults.claude_path`
+- `defaults.codex_path`
+- `defaults.idle_timeout`
+- `defaults.rate_limit`
 
 ---
 
-## P2: High 🟠
+## Implemented Parity Items
 
-### Shell Command Execution (`/shell`)
-
-**zebbern implementation:**
-- `/shell <cmd>` - Execute command
-- `/shell-input <id> <text>` - Send input to process
-- `/shell-list` - List running sessions
-- `/shell-kill <id>` - Terminate session
-- Uses `Deno.Command` with piped I/O (NOT PTY)
-- Cross-platform: python3→python, ls→dir on Windows
-
-**llm-bridge implementation:**
-
-- [ ] `/shell <cmd>` - Execute shell command
-- [ ] `/shell-input <id> <text>` - Send stdin to running process
-- [ ] `/shell-list` - List active shell sessions
-- [ ] `/shell-kill <id>` - Terminate shell session
-
-| Item | Details |
-|------|---------|
-| Files | `internal/shell/shell.go`, `internal/shell/shell_test.go` |
-| Go Library | `os/exec` (stdlib) |
-| Session Tracking | Map with unique IDs, start time, command |
-| Security | Command allowlist, path restrictions, timeouts |
-
-**Security Considerations:**
-- [ ] Allowlist of safe commands (git, ls, cat, etc.)
-- [ ] Working directory restrictions (repo root only)
-- [ ] Execution timeout (30s default)
-- [ ] Resource limits (memory, file descriptors)
-- [ ] User permission levels (admin-only destructive commands)
-
-### Claude Enhanced Modes
-
-**zebbern features:**
-- Thinking modes: none, think, think-hard, ultrathink
-- Operation modes: normal, plan, auto-accept, danger
-- `/claude-enhanced` command with options
-
-**Research needed:**
-- [ ] Verify Claude CLI supports `--thinking-mode` flag
-- [ ] Document all CLI flags for enhanced operation
-- [ ] `/claude-mode <mode>` - Switch mode per-session
+- [x] Discord bot integration
+- [x] Command routing (`/` bridge commands, `::` passthrough translation)
+- [x] LLM lifecycle controls (`/status`, `/cancel`, `/restart`)
+- [x] Dynamic repo registration (`/clone`)
+- [x] Worktree creation and listing (`/add-worktree`, `/worktrees`)
+- [x] Repo introspection (`/list-repos`, `/remove-repo`)
+- [x] Provider guardrails (Discord-only for repo/worktree mutation commands)
+- [x] Per-user and per-channel rate limiting
+- [x] Idle timeout auto-stop
+- [x] File attachment for large outputs
+- [x] Session resume support
+- [x] Codex backend support
+- [x] Terminal provider fully removed from runtime and tests
 
 ---
 
-## P3: Medium 🟡
+## Priority Plan
 
-### System Information Commands
+## P0 (Critical)
 
-**zebbern commands:**
-- `/system-info` - OS, CPU, memory, kernel
-- `/processes` - Running processes with filter/limit
-- `/system-resources` - Real-time CPU, memory, load
-- `/network-info` - Interfaces, connections, routing
-- `/disk-usage` - Filesystem space percentages
-- `/uptime` - System uptime and boot info
+### 1) ANSI/control-sequence sanitization for Discord output
 
-**llm-bridge implementation:**
+Problem:
+- PTY output can contain ANSI/control sequences and render poorly in Discord.
 
-- [ ] `/system-info` - OS and hardware summary
-- [ ] `/processes [filter]` - Top processes
-- [ ] `/disk-usage` - Disk space summary
-- [ ] `/network-info` - Network interfaces
-- [ ] `/uptime` - System uptime
+Tasks:
+- [ ] Strip ANSI escapes before provider send
+- [ ] Remove control chars unsafe for Discord rendering
+- [ ] Keep raw output available for debugging (optional toggle)
+- [ ] Add golden tests with real captured PTY fragments
 
-| Item | Details |
-|------|---------|
-| Files | `internal/sysinfo/sysinfo.go`, tests |
-| Go Library | `github.com/shirou/gopsutil/v3` |
+Suggested files:
+- `internal/output/output.go`
+- `internal/bridge/bridge.go`
+- `internal/output/output_test.go`
 
-### Dynamic Channel Creation
+Acceptance criteria:
+- Discord never receives visible escape artifacts
+- Existing file-attachment behavior remains unchanged
 
-**zebbern approach:**
-- Creates channels automatically for new repos
-- Organizes in category (CATEGORY_NAME env var)
-- Requires: Manage Channels permission
+### 2) Structured response formatting (tool-use aware)
 
-**llm-bridge consideration:**
-- [ ] Auto-create channel on `/clone` if channel-id not provided
-- [ ] Use DISCORD_CATEGORY_ID for organization
-- [ ] Update `internal/provider/discord.go`
+Problem:
+- Raw stream forwarding misses QoL formatting available in `claude-code-discord`.
 
----
+Tasks:
+- [ ] Build output normalizer that classifies content into sections:
+  - assistant response
+  - tool invocation
+  - tool result
+  - status/progress
+- [ ] Provider-specific renderer for Discord markdown blocks
+- [ ] Fallback to cleaned raw text when parser confidence is low
 
-## P4: Low (Future) 🟢
+Suggested files:
+- `internal/output/output.go`
+- `internal/output/output_test.go`
+- `internal/bridge/bridge.go`
 
-### Agent System
-
-**zebbern has 7 specialized agents:**
-1. Code Reviewer
-2. Security Analyst
-3. DevOps Engineer
-4. Performance Expert
-5. Documentation Writer
-6. Test Engineer
-7. Architect
-
-**Complexity:** High - needs separate design document
-
-- [ ] Agent orchestration framework
-- [ ] Per-agent system prompts
-- [ ] Tool access restrictions per agent
-- [ ] Isolated context windows
-
-### Additional zebbern Features
-
-- [ ] `/screenshot` - Capture host screen (local/GUI only)
-- [ ] `/port-scan` - Check open ports
-- [ ] `/service-status` - Systemd service states
-- [ ] `/system-logs` - Recent system logs
-- [ ] `/env-vars` - Environment variables (filtered)
-- [ ] MCP server management (`/mcp`)
+Acceptance criteria:
+- Tool invocations/results are visibly separated in Discord output
+- No regression in plain-text responses
 
 ---
 
-## Go Library Alternatives
+## P1 (High)
 
-| zebbern (Deno/TypeScript) | Go Equivalent | Package |
-|---------------------------|---------------|---------|
-| `Deno.Command` | `os/exec` | stdlib |
-| `Deno.readTextFile` | `os.ReadFile` | stdlib |
-| `Deno.writeTextFile` | `os.WriteFile` | stdlib |
-| `JSON.parse/stringify` | `encoding/json` | stdlib |
-| discord.js | discordgo | `github.com/bwmarrin/discordgo` |
-| (No PTY) | creack/pty | `github.com/creack/pty` ✅ |
-| (No ANSI parsing) | charmbracelet/x/ansi | `github.com/charmbracelet/x/ansi` |
-| (No system stats) | gopsutil | `github.com/shirou/gopsutil/v3` |
-| AbortController | context.Context | stdlib |
-| setTimeout | time.After | stdlib |
-| Map/Set | map/struct | stdlib |
+### 3) `/todos` parity
+
+Target commands:
+- [ ] `/todos list`
+- [ ] `/todos add <text> [priority]`
+- [ ] `/todos complete <id>`
+- [ ] `/todos delete <id>`
+- [ ] `/todos generate`
+- [ ] `/todos prioritize`
+
+Data model:
+- [ ] id, text, priority, completed, timestamps
+- [ ] JSON persistence under repo-scoped bridge data directory
+
+Suggested files:
+- `internal/todo/todo.go`
+- `internal/todo/todo_test.go`
+- `internal/router/router.go`
+- `internal/bridge/bridge.go`
+
+Acceptance criteria:
+- Todos persist across restarts
+- Concurrency-safe updates
+- Full command coverage with tests
+
+### 4) Dynamic Discord channel creation
+
+Goal:
+- Allow `/clone` without explicit channel ID by creating channel automatically.
+
+Tasks:
+- [ ] Add optional auto-channel mode in config
+- [ ] Create channel under configured category
+- [ ] Persist created channel ID to config
+- [ ] Add permission/error handling (`Manage Channels`)
+
+Suggested files:
+- `internal/provider/discord.go`
+- `internal/bridge/bridge.go`
+- `internal/config/config.go`
+
+Acceptance criteria:
+- `/clone` can succeed with generated channel in auto mode
+- Failure paths are explicit and non-destructive
+
+### 5) `/shell*` command family
+
+Target commands:
+- [ ] `/shell <cmd>`
+- [ ] `/shell-input <id> <text>`
+- [ ] `/shell-list`
+- [ ] `/shell-kill <id>`
+
+Security baseline:
+- [ ] allowlist or policy engine
+- [ ] timeouts
+- [ ] repo-root path constraints
+- [ ] explicit audit logging
+
+Acceptance criteria:
+- Multi-session process management works
+- Security gates block unsafe commands by default
 
 ---
 
-## Testing Requirements
+## P2 (Medium)
 
-All new features must:
-- [ ] Maintain 90% coverage threshold on `internal/` packages
-- [ ] Include unit tests with table-driven patterns
-- [ ] Use hand-written mocks (no testify)
-- [ ] Use `t.TempDir()` for file fixtures
+### 6) Host/system observability commands
+
+Candidate commands:
+- [ ] `/system-info`
+- [ ] `/processes [filter]`
+- [ ] `/disk-usage`
+- [ ] `/network-info`
+- [ ] `/uptime`
+
+Notes:
+- Use `gopsutil` where practical
+- Keep output concise to avoid Discord flooding
+
+### 7) Enhanced model modes
+
+Tasks:
+- [ ] Per-session mode controls for Claude/Codex backends
+- [ ] Configurable flags/presets (plan/auto-accept/etc. where supported)
+- [ ] Explicit backend capability matrix in docs
+
+---
+
+## P3 (Future)
+
+### 8) Agent orchestration layer
+
+- [ ] Define specialized agent profiles
+- [ ] Per-agent tool restrictions
+- [ ] Isolation and context boundaries
+- [ ] Auditable orchestration flow
+
+### 9) Additional operational commands
+
+- [ ] `/service-status`
+- [ ] `/system-logs`
+- [ ] `/env-vars` (safe filtered view)
+- [ ] MCP management command surface
+
+---
+
+## Not Planned / Removed
+
+- [x] Terminal stdin/stdout provider removed
+- [x] `/select` bridge command removed
+
+Reason:
+- Product direction is Discord-first operation.
+
+---
+
+## Engineering Quality Gates
+
+For each shipped feature:
+- [ ] Unit tests with table-driven coverage
+- [ ] Maintain `internal/` coverage threshold
+- [ ] No unsafe defaults for commands with host impact
+- [ ] Clear user-facing error messages for permission/config failures
 
 ---
 
 ## References
 
-- [zebbern/claude-code-discord](https://github.com/zebbern/claude-code-discord) - Source project
-- [charmbracelet/x/ansi](https://pkg.go.dev/github.com/charmbracelet/x/ansi) - ANSI escape handling
-- [leaanthony/go-ansi-parser](https://github.com/leaanthony/go-ansi-parser) - ANSI to structured data
-- [shirou/gopsutil](https://github.com/shirou/gopsutil) - Cross-platform system stats
-- [Claude Code CLI](https://code.claude.com/docs/en/cli-reference) - CLI flags reference
-
----
-
-*Generated by llm-bridge minions workflow*
-*Date: 2026-02-05*
+- `claude-code-discord`: https://github.com/zebbern/claude-code-discord
+- ANSI stripping: https://pkg.go.dev/github.com/charmbracelet/x/ansi
+- System stats: https://github.com/shirou/gopsutil
+- Claude CLI reference: https://code.claude.com/docs/en/cli-reference

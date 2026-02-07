@@ -154,6 +154,26 @@ func TestDefaults_GetClaudePath(t *testing.T) {
 	}
 }
 
+func TestDefaults_GetCodexPath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"empty returns default", "", "codex"},
+		{"custom path", "/usr/local/bin/codex", "/usr/local/bin/codex"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := Defaults{CodexPath: tt.path}
+			if got := d.GetCodexPath(); got != tt.want {
+				t.Errorf("GetCodexPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefaults_GetResumeSession(t *testing.T) {
 	t.Run("nil returns true", func(t *testing.T) {
 		d := Defaults{}

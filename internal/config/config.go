@@ -35,6 +35,7 @@ type WorktreeConfig struct {
 type Defaults struct {
 	LLM             string          `yaml:"llm"`
 	ClaudePath      string          `yaml:"claude_path"`
+	CodexPath       string          `yaml:"codex_path"`
 	OutputThreshold int             `yaml:"output_threshold"`
 	IdleTimeout     string          `yaml:"idle_timeout"`
 	ResumeSession   *bool           `yaml:"resume_session"`
@@ -114,6 +115,15 @@ func (d Defaults) GetClaudePath() string {
 	return d.ClaudePath
 }
 
+// GetCodexPath returns the path to the Codex CLI binary.
+// Defaults to "codex" if not explicitly set.
+func (d Defaults) GetCodexPath() string {
+	if d.CodexPath == "" {
+		return "codex"
+	}
+	return d.CodexPath
+}
+
 // GetResumeSession returns whether LLM sessions should resume on reconnect.
 // Defaults to true if not explicitly set.
 func (d Defaults) GetResumeSession() bool {
@@ -150,7 +160,7 @@ type ProviderConfigs struct {
 type DiscordConfig struct {
 	BotToken      string `yaml:"bot_token"`
 	ApplicationID string `yaml:"application_id"`
-	PublicKey      string `yaml:"public_key"`
+	PublicKey     string `yaml:"public_key"`
 	TestChannelID string `yaml:"test_channel_id"`
 }
 

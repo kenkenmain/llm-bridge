@@ -146,7 +146,6 @@ You should see log output indicating the Discord provider started:
 
 ```
 level=INFO msg="discord provider started" channels=1
-level=INFO msg="terminal provider started"
 ```
 
 ---
@@ -199,7 +198,7 @@ The bot is missing the **Send Messages** or **Attach Files** permission in the c
 ### Bot appears offline in Discord
 
 - The bot token may be invalid or expired. Reset the token in the Developer Portal and update your `DISCORD_BOT_TOKEN` environment variable.
-- llm-bridge may not be running. Check your terminal or process manager for errors.
+- llm-bridge may not be running. Check logs or your process manager for errors.
 - If the token is set in the YAML via `${DISCORD_BOT_TOKEN}` but the environment variable is not exported, the token will be an empty string and the Discord provider will not start (no error is logged; it simply skips Discord initialization).
 
 ### Rate limit messages appearing
