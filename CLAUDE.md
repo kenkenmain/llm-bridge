@@ -8,7 +8,7 @@ This project uses **Bazel 8.5.1** for hermetic builds, testing, and linting.
 Install [Bazelisk](https://github.com/bazelbuild/bazelisk) (auto-downloads the correct Bazel version).
 
 - **Go 1.23.6** (managed by Bazel via `go_sdk.download` in MODULE.bazel — no local install needed)
-- **Claude CLI** (`@anthropic-ai/claude-code`) — runtime dependency, spawned as child process via PTY
+- **Claude CLI** (`@anthropic-ai/claude-code`) — runtime dependency, spawned as child process via pipes (process-per-message with -p flag)
 
 ## Dependencies
 
@@ -182,7 +182,7 @@ providers:
 
 - `internal/bridge/` - Core bridge logic, input merging, output broadcasting
 - `internal/config/` - YAML config parsing
-- `internal/llm/` - LLM interface, Claude wrapper (PTY-based)
+- `internal/llm/` - LLM interface, Claude wrapper (pipe-based, process-per-message)
 - `internal/provider/` - Discord/Terminal providers (Discord requires specific Gateway Intents and bot permissions — see `docs/discord-setup.md`)
 - `internal/ratelimit/` - Per-user and per-channel rate limiting
 - `internal/router/` - Command routing (/, ::)
@@ -192,7 +192,7 @@ providers:
 
 - Lint runs **outside Bazel sandbox** (`no-sandbox` tag) — needs network for first `golangci-lint` download
 - Only `claude` LLM backend exists (Codex was removed). Factory defaults empty string to `claude`
-- Claude is spawned via PTY (`creack/pty`), not stdin pipe — output parsing depends on terminal behavior
+- Claude is spawned via `claude -p --output-format stream-json` (process-per-message). Each `Send()` spawns a new subprocess. Output is NDJSON parsed in `readOutput()` to extract text content for broadcasting
 - See `llm-bridge.yaml.example` for config structure; can start with empty `repos:` and use `/clone` dynamically
 - Bazel builds are fully hermetic (Go SDK downloaded automatically) — only Bazelisk + Node.js needed on host
 - Docker solves deployment packaging, not build reproducibility (Bazel already handles that)
@@ -200,10 +200,9 @@ providers:
 
 ## TODO
 
-- [ ] **Session persistence** — Wrap Claude in tmux (`tmux new-session -d -s claude-{repo} claude`) so sessions survive bridge crashes. Read output via `tmux capture-pane` instead of direct PTY. Inspired by [disclaude/app](https://github.com/disclaude/app)
-- [ ] **Session recovery on restart** — Rediscover orphaned tmux sessions on startup and reconnect to their Discord channels (similar to disclaude's `/claude sync`)
+- [ ] **Session persistence** — Persist session IDs to disk so sessions survive bridge restarts. On restart, use `-r <session-id>` to resume conversations
+- [ ] **Session recovery on restart** — Load persisted session IDs on startup and reconnect to their Discord channels
 - [ ] **Path allowlisting** — Validate `working_dir` against an allowlist of base paths before spawning Claude, especially if session creation is ever exposed to Discord users
-- [ ] **Dual access to sessions** — Allow `tmux attach` to a running Claude session while it's also being driven via Discord, for live debugging
 - [ ] **Bot presence** — Update Discord bot status to show active session count (e.g. `Watching 3 sessions`)
 
 ## CI

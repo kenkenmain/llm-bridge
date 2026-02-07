@@ -1318,8 +1318,8 @@ func TestBridge_ReadOutput_WithOutput(t *testing.T) {
 		done <- true
 	}()
 
-	// Write some output and close
-	_, _ = pw.Write([]byte("Hello, world!\n"))
+	// Write NDJSON stream-json event and close
+	_, _ = pw.Write([]byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello, world!"}}` + "\n"))
 	_ = pw.Close()
 
 	select {
@@ -1333,6 +1333,10 @@ func TestBridge_ReadOutput_WithOutput(t *testing.T) {
 	msgs := mockProv.GetSentMessages()
 	if len(msgs) == 0 {
 		t.Error("expected output to be broadcast")
+	}
+	// Verify text was extracted from JSON, not raw JSON broadcast
+	if len(msgs) > 0 && strings.Contains(msgs[0].Content, "content_block_delta") {
+		t.Error("raw JSON should not be broadcast, text should be extracted")
 	}
 }
 
@@ -1363,8 +1367,8 @@ func TestBridge_ReadOutput_BufferFlush(t *testing.T) {
 		done <- true
 	}()
 
-	// Write more than threshold
-	_, _ = pw.Write([]byte("This is a longer message that exceeds the threshold\n"))
+	// Write NDJSON event with text exceeding threshold
+	_, _ = pw.Write([]byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"This is a longer message that exceeds the threshold"}}` + "\n"))
 	_ = pw.Close()
 
 	select {
@@ -1372,6 +1376,75 @@ func TestBridge_ReadOutput_BufferFlush(t *testing.T) {
 		// readOutput returned
 	case <-time.After(500 * time.Millisecond):
 		t.Error("readOutput should return when pipe is closed")
+	}
+}
+
+// Tests for extractText (NDJSON stream-json parsing)
+func TestExtractText(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "text delta event",
+			input: `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}`,
+			want:  "hello",
+		},
+		{
+			name:  "message_start event",
+			input: `{"type":"message_start","message":{"id":"msg_123"}}`,
+			want:  "",
+		},
+		{
+			name:  "content_block_start event",
+			input: `{"type":"content_block_start","index":0}`,
+			want:  "",
+		},
+		{
+			name:  "content_block_stop event",
+			input: `{"type":"content_block_stop","index":0}`,
+			want:  "",
+		},
+		{
+			name:  "message_stop event",
+			input: `{"type":"message_stop"}`,
+			want:  "",
+		},
+		{
+			name:  "result event",
+			input: `{"type":"result","result":{"session_id":"abc123"}}`,
+			want:  "",
+		},
+		{
+			name:  "invalid JSON",
+			input: `not json at all`,
+			want:  "",
+		},
+		{
+			name:  "empty string",
+			input: ``,
+			want:  "",
+		},
+		{
+			name:  "tool_use delta (not text)",
+			input: `{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{"}}`,
+			want:  "",
+		},
+		{
+			name:  "text with special characters",
+			input: `{"type":"content_block_delta","delta":{"type":"text_delta","text":"line1\nline2"}}`,
+			want:  "line1\nline2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractText(tt.input)
+			if got != tt.want {
+				t.Errorf("extractText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
